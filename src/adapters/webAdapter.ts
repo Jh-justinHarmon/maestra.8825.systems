@@ -2,9 +2,9 @@ import { SCHEMA_VERSION } from './types';
 import type { Adapter, Response, ContextResult, CaptureResult, Context } from './types';
 
 // Maestra Backend API endpoint
-// In production: https://api.8825.systems/maestra
-// In development: http://localhost:8825
-const API_BASE = process.env.REACT_APP_MAESTRA_API || 'http://localhost:8825';
+// In production: https://maestra-backend-8825-systems.fly.dev
+// In development: http://localhost:8000
+const API_BASE = process.env.REACT_APP_MAESTRA_API || 'https://maestra-backend-8825-systems.fly.dev';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
