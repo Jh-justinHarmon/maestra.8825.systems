@@ -9,13 +9,14 @@ primary_region = 'dfw'
 [build]
   builder = 'heroku/buildpacks:20'
 
-[build.buildpacks]
-  [[build.buildpacks]]
-    package = 'heroku/nodejs-engine'
-  [[build.buildpacks]]
-    package = 'heroku/nodejs-npm-engine'
-  [[build.buildpacks]]
-    package = 'heroku/nodejs-npm-install'
+[[build.buildpacks]]
+  package = 'heroku/nodejs-engine'
+
+[[build.buildpacks]]
+  package = 'heroku/nodejs-npm-engine'
+
+[[build.buildpacks]]
+  package = 'heroku/nodejs-npm-install'
 
 [env]
   NODE_ENV = 'production'
