@@ -1,0 +1,7 @@
+{
+  "schema_version": "1",
+  "id": "msg_001",
+  "role": "user",
+  "content": "How do I set up a React project with TypeScript and Tailwind?",
+  "timestamp": "2025-01-15T10:00:00.000Z"
+}

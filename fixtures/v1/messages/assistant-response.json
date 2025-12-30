@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "message": {
+    "id": "msg_002",
+    "role": "assistant",
+    "content": "To set up a React project with TypeScript and Tailwind, I recommend using Vite:\n\n1. Run `npm create vite@latest my-app -- --template react-ts`\n2. Install Tailwind: `npm install -D tailwindcss postcss autoprefixer`\n3. Initialize Tailwind: `npx tailwindcss init -p`\n4. Configure your `tailwind.config.js` content paths\n5. Add Tailwind directives to your CSS\n\nWould you like me to walk through any of these steps in detail?",
+    "timestamp": "2025-01-15T10:00:02.500Z"
+  },
+  "streaming": false
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "relevantDocs": [
+    "Vite + React + TypeScript setup guide",
+    "Tailwind CSS installation documentation",
+    "Previous conversation: Setting up development environment"
+  ],
+  "suggestions": [
+    "You might also want to add ESLint and Prettier",
+    "Consider using shadcn/ui for component library"
+  ]
+}

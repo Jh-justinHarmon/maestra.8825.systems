@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "id": "cap_005",
+  "title": "Capture: Shared text from Notes",
+  "summary": "Meeting notes: Discussed Q1 roadmap priorities and resource allocation.",
+  "timestamp": "2025-01-15T17:00:00.000Z",
+  "source": {
+    "url": null,
+    "title": "Notes",
+    "domain": null
+  },
+  "content": {
+    "extracted_text": "Meeting notes: Discussed Q1 roadmap priorities and resource allocation. Key decisions: 1) Focus on stability first, 2) Ship extension by end of month, 3) iOS share sheet is high priority.",
+    "word_count": 31
+  },
+  "focus": {
+    "type": "selection",
+    "text": "Meeting notes: Discussed Q1 roadmap priorities and resource allocation.",
+    "word_count": 9
+  },
+  "mode": "default",
+  "metadata": {
+    "captured_at": "2025-01-15T17:00:00.000Z",
+    "surface": "ios_share_sheet"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "id": "cap_004",
+  "title": "Capture: Shared URL from Safari",
+  "summary": "https://techcrunch.com/2025/01/15/ai-assistants-are-evolving",
+  "timestamp": "2025-01-15T16:20:00.000Z",
+  "source": {
+    "url": "https://techcrunch.com/2025/01/15/ai-assistants-are-evolving",
+    "title": "AI Assistants Are Evolving - TechCrunch",
+    "domain": "techcrunch.com"
+  },
+  "content": {
+    "extracted_text": null,
+    "word_count": 0
+  },
+  "focus": null,
+  "mode": "default",
+  "metadata": {
+    "captured_at": "2025-01-15T16:20:00.000Z",
+    "surface": "ios_share_sheet"
+  }
+}

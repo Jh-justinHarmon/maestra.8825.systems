@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "id": "cap_002",
+  "title": "Capture: Selected text from article",
+  "summary": "Start with a minimal viable product and expand from there.",
+  "timestamp": "2025-01-15T14:35:00.000Z",
+  "source": {
+    "url": "https://example.com/article/how-to-build-apps",
+    "title": "How to Build Apps - Example Site",
+    "domain": "example.com"
+  },
+  "content": {
+    "extracted_text": "How to Build Apps\n\nBuilding apps requires understanding your users, defining clear requirements, and iterating based on feedback. Start with a minimal viable product and expand from there.",
+    "word_count": 28
+  },
+  "focus": {
+    "type": "selection",
+    "text": "Start with a minimal viable product and expand from there.",
+    "word_count": 10
+  },
+  "mode": "default",
+  "metadata": {
+    "captured_at": "2025-01-15T14:35:00.000Z",
+    "surface": "extension"
+  }
+}
