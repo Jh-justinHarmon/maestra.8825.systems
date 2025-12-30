@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { MaestraCard, Header, PinsDrawer, ErrorBoundary } from './components';
-import { mockAdapter } from './adapters';
+import { webAdapter } from './adapters';
 import { selectMode, type PageContext } from './modes';
 import { trackMessageSent, trackCaptureCreated, trackModeSelected } from './lib/analytics';
 import type { Message, Context, CaptureResult } from './adapters/types';
@@ -41,7 +41,7 @@ function AppContent() {
     trackMessageSent(modeMatch.mode.id, !!context);
 
     try {
-      const response = await mockAdapter.sendMessage(conversationId, content, context);
+      const response = await webAdapter.sendMessage(conversationId, content, context);
       setMessages((prev) => [...prev, response.message]);
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -52,7 +52,7 @@ function AppContent() {
 
   const handleCapture = useCallback(async (payload: { content: string; context?: Context }) => {
     try {
-      const result = await mockAdapter.capture(payload);
+      const result = await webAdapter.capture(payload);
       setPins((prev) => [result, ...prev]);
       setIsPinsOpen(true);
       trackCaptureCreated(modeMatch.mode.id);
