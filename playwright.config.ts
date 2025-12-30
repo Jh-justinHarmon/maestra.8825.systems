@@ -7,6 +7,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
+  timeout: 30000,
   use: {
     baseURL: 'http://localhost:5000',
     trace: 'on-first-retry',
@@ -24,11 +25,7 @@ export default defineConfig({
       command: 'npm run dev',
       url: 'http://localhost:5000',
       reuseExistingServer: !process.env.CI,
-    },
-    {
-      command: 'npm run dev --workspace=mock-backend',
-      url: 'http://localhost:3001/health',
-      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
     },
   ],
 });

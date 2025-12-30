@@ -80,11 +80,12 @@ export function MaestraCard({
     : 'flex flex-col h-80 bg-zinc-800 rounded-lg shadow-lg';
 
   return (
-    <div className={containerClass}>
+    <div className={containerClass} data-testid="maestra-card">
       <div
         ref={messagesContainerRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4 space-y-4 relative"
+        data-testid="messages-container"
       >
         {messages.length === 0 && (
           <div className="flex items-center justify-center h-full text-zinc-500">
@@ -152,7 +153,7 @@ export function MaestraCard({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-2" data-testid="message-form">
           <div className="flex gap-2">
             <input
               type="text"
@@ -161,11 +162,13 @@ export function MaestraCard({
               placeholder={captureMode ? "Describe what you want to capture..." : "Type a message..."}
               className="flex-1 bg-zinc-900 text-zinc-100 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/50 placeholder-zinc-500"
               disabled={isStreaming}
+              data-testid="message-input"
             />
             <button
               type="submit"
               disabled={!inputValue.trim() || isStreaming}
               className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2.5 transition-colors flex items-center gap-2"
+              data-testid="send-button"
             >
               {captureMode ? (
                 <>
@@ -198,6 +201,7 @@ export function MaestraCard({
                   : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700'
               }`}
               title="Toggle capture mode"
+              data-testid="capture-mode-toggle"
             >
               <Camera size={16} />
             </button>

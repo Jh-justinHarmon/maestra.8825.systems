@@ -16,6 +16,7 @@ export function PinsDrawer({ isOpen, onClose, pins, onShare }: PinsDrawerProps) 
         isOpen ? 'translate-x-0' : 'translate-x-full'
       }`}
       style={{ backgroundColor: '#1f1f23' }}
+      data-testid="pins-drawer"
     >
       <div className="flex items-center justify-between p-4 border-b border-zinc-700">
         <div className="flex items-center gap-2 text-zinc-200">
