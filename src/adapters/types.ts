@@ -1,8 +1,13 @@
+export const SCHEMA_VERSION = '1' as const;
+
+export type SchemaVersion = typeof SCHEMA_VERSION;
+export type ISODateTimeString = string;
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  timestamp: Date;
+  timestamp: ISODateTimeString;
 }
 
 export interface Context {
@@ -11,20 +16,23 @@ export interface Context {
 }
 
 export interface Response {
+  schema_version: SchemaVersion;
   message: Message;
   streaming?: boolean;
 }
 
 export interface ContextResult {
+  schema_version: SchemaVersion;
   relevantDocs: string[];
   suggestions: string[];
 }
 
 export interface CaptureResult {
+  schema_version: SchemaVersion;
   id: string;
   title: string;
   summary: string;
-  timestamp: Date;
+  timestamp: ISODateTimeString;
 }
 
 export interface Adapter {

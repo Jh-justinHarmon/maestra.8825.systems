@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from './types';
 import type { Adapter, Response, ContextResult, CaptureResult, Context } from './types';
 
 const mockResponses = [
@@ -27,11 +28,12 @@ export const mockAdapter: Adapter = {
     }
     
     return {
+      schema_version: SCHEMA_VERSION,
       message: {
         id: generateId(),
         role: 'assistant',
         content: responseContent,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       },
     };
   },
@@ -39,6 +41,7 @@ export const mockAdapter: Adapter = {
   async prefetchContext(query: string): Promise<ContextResult> {
     await delay(200);
     return {
+      schema_version: SCHEMA_VERSION,
       relevantDocs: [`Document related to: ${query}`],
       suggestions: ['Try asking about...', 'You might also want to...'],
     };
@@ -48,10 +51,11 @@ export const mockAdapter: Adapter = {
     await delay(300);
     const words = payload.content.split(' ').slice(0, 5).join(' ');
     return {
+      schema_version: SCHEMA_VERSION,
       id: generateId(),
       title: `Capture: ${words}...`,
       summary: payload.content.substring(0, 100),
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
   },
 };
