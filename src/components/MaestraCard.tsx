@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Paperclip, Camera, Settings, X, ArrowDown } from 'lucide-react';
+import { Send, Paperclip, Camera, Settings, X, ArrowDown, Target } from 'lucide-react';
 import type { Message, Context } from '../adapters/types';
 
 interface MaestraCardProps {
@@ -56,7 +56,14 @@ export function MaestraCard({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue.trim()) return;
+    
+    // In capture mode, allow empty input (capture selection only)
+    // In normal mode, require input
+    if (captureMode) {
+      if (!inputValue.trim() && !selection) return;
+    } else {
+      if (!inputValue.trim()) return;
+    }
 
     const context: Context = {};
     if (selection) {
@@ -64,7 +71,9 @@ export function MaestraCard({
     }
 
     if (captureMode && onCapture) {
-      onCapture({ content: inputValue, context });
+      onCapture({ content: inputValue || selection || '', context });
+      // Deselect capture mode after successful capture
+      setCaptureMode(false);
     } else {
       onSendMessage(inputValue, Object.keys(context).length > 0 ? context : undefined);
     }
@@ -129,13 +138,15 @@ export function MaestraCard({
       </div>
 
       {showScrollButton && (
-        <button
-          onClick={scrollToBottom}
-          className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 px-3 py-1.5 rounded-full text-sm flex items-center gap-1 shadow-lg transition-colors"
-        >
-          <ArrowDown size={14} />
-          Scroll to latest
-        </button>
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={scrollToBottom}
+            className="bg-zinc-700 hover:bg-zinc-600 active:bg-zinc-500 text-zinc-200 px-3 py-1.5 rounded-full text-sm flex items-center gap-1 shadow-lg transition-colors"
+          >
+            <ArrowDown size={14} />
+            Scroll to latest
+          </button>
+        </div>
       )}
 
       <div className="p-4 border-t border-zinc-700">
@@ -166,13 +177,13 @@ export function MaestraCard({
             />
             <button
               type="submit"
-              disabled={!inputValue.trim() || isStreaming}
-              className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2.5 transition-colors flex items-center gap-2"
+              disabled={(captureMode && !inputValue.trim() && !selection) || (!captureMode && !inputValue.trim()) || isStreaming}
+              className="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2.5 transition-colors flex items-center gap-2"
               data-testid="send-button"
             >
               {captureMode ? (
                 <>
-                  <Camera size={18} />
+                  <Target size={18} />
                   Capture
                 </>
               ) : (
@@ -187,8 +198,21 @@ export function MaestraCard({
           <div className="flex items-center gap-1">
             <button
               type="button"
-              className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 rounded-lg transition-colors"
+              className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600 rounded-lg transition-colors"
               title="Attach file"
+              onClick={() => {
+                // Trigger file input
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.onchange = (e) => {
+                  const file = (e.target as HTMLInputElement).files?.[0];
+                  if (file) {
+                    // File attachment logic would go here
+                    console.log('File selected:', file.name);
+                  }
+                };
+                input.click();
+              }}
             >
               <Paperclip size={16} />
             </button>
@@ -197,8 +221,8 @@ export function MaestraCard({
               onClick={() => setCaptureMode(!captureMode)}
               className={`p-2 rounded-lg transition-colors ${
                 captureMode
-                  ? 'text-blue-400 bg-blue-500/20'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700'
+                  ? 'text-blue-400 bg-blue-500/20 hover:bg-blue-500/30 active:bg-blue-500/40'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600'
               }`}
               title="Toggle capture mode"
               data-testid="capture-mode-toggle"
@@ -207,7 +231,7 @@ export function MaestraCard({
             </button>
             <button
               type="button"
-              className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 rounded-lg transition-colors"
+              className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600 rounded-lg transition-colors"
               title="Settings"
             >
               <Settings size={16} />
