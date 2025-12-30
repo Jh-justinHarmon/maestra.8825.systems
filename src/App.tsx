@@ -1,16 +1,26 @@
 import { useState, useCallback } from 'react';
-import { MaestraCard, Header, PinsDrawer } from './components';
+import { MaestraCard, Header, PinsDrawer, ErrorBoundary } from './components';
 import { mockAdapter } from './adapters';
+import { selectMode, type PageContext } from './modes';
 import type { Message, Context, CaptureResult } from './adapters/types';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
-function App() {
+function AppContent() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [pins, setPins] = useState<CaptureResult[]>([]);
   const [isPinsOpen, setIsPinsOpen] = useState(false);
   const conversationId = 'main';
+
+  // Detect current page context and select mode
+  const pageContext: PageContext = {
+    url: window.location.href,
+    title: document.title,
+    domain: window.location.hostname,
+    selection: window.getSelection()?.toString() || undefined,
+  };
+  const modeMatch = selectMode(pageContext);
 
   const handleSendMessage = useCallback(async (content: string, context?: Context) => {
     const userMessage: Message = {
@@ -51,7 +61,9 @@ function App() {
     <div className="h-screen flex flex-col bg-zinc-900">
       <Header 
         onTogglePins={() => setIsPinsOpen(!isPinsOpen)} 
-        pinsCount={pins.length} 
+        pinsCount={pins.length}
+        modeId={modeMatch.mode.id}
+        modeConfidence={modeMatch.confidence}
       />
 
       <main className="flex-1 p-6 overflow-hidden">
@@ -80,6 +92,14 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }
 

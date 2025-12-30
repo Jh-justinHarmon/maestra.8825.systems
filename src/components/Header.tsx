@@ -3,9 +3,22 @@ import { Pin, Sparkles } from 'lucide-react';
 interface HeaderProps {
   onTogglePins: () => void;
   pinsCount: number;
+  modeId?: string;
+  modeConfidence?: number;
 }
 
-export function Header({ onTogglePins, pinsCount }: HeaderProps) {
+export function Header({ onTogglePins, pinsCount, modeId, modeConfidence }: HeaderProps) {
+  const getModeLabel = (id: string) => {
+    switch (id) {
+      case 'replit_collaborator':
+        return 'Replit';
+      case 'default':
+        return 'Default';
+      default:
+        return id;
+    }
+  };
+
   return (
     <header className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
       <div className="flex items-center gap-2">
@@ -13,6 +26,16 @@ export function Header({ onTogglePins, pinsCount }: HeaderProps) {
           <Sparkles size={18} className="text-white" />
         </div>
         <h1 className="text-xl font-semibold text-zinc-100">Maestra</h1>
+        {modeId && (
+          <span className="ml-2 px-2 py-1 text-xs font-medium text-zinc-400 bg-zinc-800 rounded">
+            {getModeLabel(modeId)}
+            {modeConfidence !== undefined && (
+              <span className="text-zinc-500 ml-1">
+                {Math.round(modeConfidence * 100)}%
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
