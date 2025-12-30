@@ -7,16 +7,7 @@ app = 'maestra-8825-systems'
 primary_region = 'dfw'
 
 [build]
-  builder = 'heroku/buildpacks:20'
-
-[[build.buildpacks]]
-  package = 'heroku/nodejs-engine'
-
-[[build.buildpacks]]
-  package = 'heroku/nodejs-npm-engine'
-
-[[build.buildpacks]]
-  package = 'heroku/nodejs-npm-install'
+  dockerfile = 'Dockerfile'
 
 [env]
   NODE_ENV = 'production'
