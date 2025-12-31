@@ -3,6 +3,7 @@
 import hashlib
 import uuid
 import platform
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
@@ -52,14 +53,26 @@ class BackendIdentity:
         """
         Load existing keypair from keychain or generate new RSA-2048 keypair
         
+        For local backends: Uses OS keychain
+        For hosted backends: Uses environment variable BACKEND_PRIVATE_KEY
+        
         Returns:
             (public_key_pem, private_key_pem)
         """
-        # Try to load from keychain first
-        from keychain import KeychainManager
-        keychain = KeychainManager()
+        existing_private_key = None
         
-        existing_private_key = keychain.load_private_key(self.backend_id)
+        # Hosted backends use environment variable (no keychain in containers)
+        if self.backend_type == "hosted":
+            existing_private_key = os.getenv("BACKEND_PRIVATE_KEY")
+        else:
+            # Local backends use OS keychain
+            try:
+                from keychain import KeychainManager
+                keychain = KeychainManager()
+                existing_private_key = keychain.load_private_key(self.backend_id)
+            except Exception:
+                # Keychain not available, will generate new key
+                pass
         
         if existing_private_key:
             # Load existing keypair
