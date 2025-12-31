@@ -41,14 +41,14 @@ function AppContent() {
     trackMessageSent(modeMatch.mode.id, !!context);
 
     try {
-      const response = await webAdapter.sendMessage(conversationId, content, context);
+      const response = await webAdapter.sendMessage(conversationId, content, context, messages);
       setMessages((prev) => [...prev, response.message]);
     } catch (error) {
       console.error('Failed to send message:', error);
     } finally {
       setIsStreaming(false);
     }
-  }, [modeMatch]);
+  }, [modeMatch, messages]);
 
   const handleCapture = useCallback(async (payload: { content: string; context?: Context }) => {
     try {

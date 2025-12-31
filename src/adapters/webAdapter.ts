@@ -80,7 +80,7 @@ async function registerSessionCapabilities(
 }
 
 export const webAdapter: Adapter = {
-  async sendMessage(conversationId: string, message: string, context?: Context): Promise<Response> {
+  async sendMessage(conversationId: string, message: string, context?: Context, messages?: any[]): Promise<Response> {
     try {
       // Fire parallel requests: handshake + backend (non-blocking)
       const handshakePromise = attemptHandshake();
@@ -124,8 +124,19 @@ export const webAdapter: Adapter = {
 
       const localContext = await Promise.race([localContextPromise, localContextTimeout]);
 
+      // Build conversation history (last 5 messages for context)
+      const conversationHistory = messages
+        ? messages.slice(-5).map((msg: any) => ({
+            role: msg.role || (msg.isUser ? 'user' : 'assistant'),
+            content: msg.content || msg.text || msg.answer,
+          }))
+        : [];
+
       const fallbackContext = context?.selection ? { selection: context.selection } : null;
       const clientContext = localContext || fallbackContext;
+      
+      // Merge conversation history into client context
+      const enrichedContext = clientContext ? { ...clientContext, conversation_history: conversationHistory } : { conversation_history: conversationHistory };
       
       const backendPromise = fetch(`${API_BASE}/api/maestra/advisor/ask`, {
         method: 'POST',
@@ -135,7 +146,7 @@ export const webAdapter: Adapter = {
           question: message,
           mode: 'quick',
           context_hints: context?.selection ? ['selection'] : [],
-          client_context: clientContext,
+          client_context: enrichedContext,
         }),
       });
       

@@ -36,7 +36,7 @@ export interface CaptureResult {
 }
 
 export interface Adapter {
-  sendMessage(conversationId: string, message: string, context?: Context): Promise<Response>;
+  sendMessage(conversationId: string, message: string, context?: Context, messages?: Message[]): Promise<Response>;
   prefetchContext(query: string): Promise<ContextResult>;
   capture(payload: { content: string; context?: Context }): Promise<CaptureResult>;
 }
