@@ -1,5 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Paperclip, Camera, Settings, X, ArrowDown, Target } from 'lucide-react';
+
+// Type declaration for ImageCapture API (not in default TS lib)
+declare class ImageCapture {
+  constructor(track: MediaStreamTrack);
+  grabFrame(): Promise<ImageBitmap>;
+}
 import type { Message, Context } from '../adapters/types';
 
 interface MaestraCardProps {
@@ -18,11 +24,125 @@ export function MaestraCard({
   isStreaming = false,
 }: MaestraCardProps) {
   const [inputValue, setInputValue] = useState('');
-  const [captureMode, setCaptureMode] = useState(false);
+  const [captureButtonMode, setCaptureButtonMode] = useState(false);
   const [selection, setSelection] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [screenshotStatus, setScreenshotStatus] = useState<'idle' | 'capturing' | 'success' | 'error'>('idle');
+  const [captureType, setCaptureType] = useState<'screenshot' | 'code' | null>(null);
+  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  // Screenshot capture function
+  const captureScreenshot = async () => {
+    setScreenshotStatus('capturing');
+    setCaptureType('screenshot');
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: 'browser' } as MediaTrackConstraints,
+        audio: false,
+      });
+      const track = stream.getVideoTracks()[0];
+      const imageCapture = new ImageCapture(track);
+      const bitmap = await imageCapture.grabFrame();
+      track.stop();
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(bitmap, 0, 0);
+      
+      canvas.toBlob(async (blob) => {
+        if (blob) {
+          try {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            setScreenshotStatus('success');
+            setTimeout(() => { setScreenshotStatus('idle'); setCaptureType(null); }, 1500);
+          } catch {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `maestra-screenshot-${Date.now()}.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+            setScreenshotStatus('success');
+            setTimeout(() => { setScreenshotStatus('idle'); setCaptureType(null); }, 1500);
+          }
+        }
+      }, 'image/png');
+    } catch (err) {
+      console.error('Screenshot capture failed:', err);
+      setScreenshotStatus('error');
+      setTimeout(() => { setScreenshotStatus('idle'); setCaptureType(null); }, 2000);
+    }
+  };
+
+  // Code/context capture function
+  const captureCode = async () => {
+    setScreenshotStatus('capturing');
+    setCaptureType('code');
+    try {
+      // Gather page context
+      const pageContext = {
+        url: window.location.href,
+        title: document.title,
+        timestamp: new Date().toISOString(),
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        // Get console errors if available
+        userAgent: navigator.userAgent,
+        // Capture visible text content (truncated)
+        visibleText: document.body.innerText.slice(0, 5000),
+        // Get any error elements
+        errors: Array.from(document.querySelectorAll('[class*="error"], [class*="Error"]'))
+          .map(el => el.textContent?.trim())
+          .filter(Boolean)
+          .slice(0, 10),
+        // Get meta tags
+        meta: Array.from(document.querySelectorAll('meta'))
+          .map(m => ({ name: m.getAttribute('name'), content: m.getAttribute('content') }))
+          .filter(m => m.name),
+      };
+
+      const contextText = `# Page Context Capture
+URL: ${pageContext.url}
+Title: ${pageContext.title}
+Timestamp: ${pageContext.timestamp}
+Viewport: ${pageContext.viewport.width}x${pageContext.viewport.height}
+User Agent: ${pageContext.userAgent}
+
+## Errors Found (${pageContext.errors.length})
+${pageContext.errors.length > 0 ? pageContext.errors.join('\n') : 'None detected'}
+
+## Page Content (truncated)
+${pageContext.visibleText.slice(0, 2000)}...
+`;
+
+      await navigator.clipboard.writeText(contextText);
+      setScreenshotStatus('success');
+      setTimeout(() => { setScreenshotStatus('idle'); setCaptureType(null); }, 1500);
+    } catch (err) {
+      console.error('Code capture failed:', err);
+      setScreenshotStatus('error');
+      setTimeout(() => { setScreenshotStatus('idle'); setCaptureType(null); }, 2000);
+    }
+  };
+
+  // Handle click with single/double detection
+  const handleCameraClick = () => {
+    if (clickTimeoutRef.current) {
+      // Double-click detected - cancel single click and do code capture
+      clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = null;
+      captureCode();
+    } else {
+      // Wait to see if it's a double-click
+      clickTimeoutRef.current = setTimeout(() => {
+        clickTimeoutRef.current = null;
+        captureScreenshot();
+      }, 250); // 250ms window for double-click
+    }
+  };
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -59,7 +179,7 @@ export function MaestraCard({
     
     // In capture mode, allow empty input (capture selection only)
     // In normal mode, require input
-    if (captureMode) {
+    if (captureButtonMode) {
       if (!inputValue.trim() && !selection) return;
     } else {
       if (!inputValue.trim()) return;
@@ -70,10 +190,10 @@ export function MaestraCard({
       context.selection = selection;
     }
 
-    if (captureMode && onCapture) {
+    if (captureButtonMode && onCapture) {
       onCapture({ content: inputValue || selection || '', context });
       // Deselect capture mode after successful capture
-      setCaptureMode(false);
+      setCaptureButtonMode(false);
     } else {
       onSendMessage(inputValue, Object.keys(context).length > 0 ? context : undefined);
     }
@@ -167,20 +287,20 @@ export function MaestraCard({
         )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-2" data-testid="message-form">
-          <div className="flex gap-2">
+          <div className="flex gap-2.5">
             <input
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder={captureMode ? "Describe what you want to capture..." : "Type a message..."}
-              className="flex-1 bg-zinc-900 text-zinc-100 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-brand/50 placeholder-zinc-500"
+              placeholder={captureButtonMode ? "Describe what you want to capture..." : "Type a message..."}
+              className="flex-1 bg-zinc-900 text-zinc-100 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand/50 placeholder-zinc-500"
               disabled={isStreaming}
               data-testid="message-input"
             />
             <button
               type="submit"
               disabled={!inputValue.trim() || isStreaming}
-              className="bg-brand hover:bg-brand/90 active:bg-brand/80 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2.5 transition-colors flex items-center gap-2"
+              className="bg-brand hover:bg-brand/90 active:bg-brand/80 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg px-2.5 py-1.5 transition-colors flex items-center gap-2"
               data-testid="send-button"
             >
               <Send size={18} />
@@ -199,7 +319,7 @@ export function MaestraCard({
                 }
               }}
               disabled={(!inputValue.trim() && !selection) || isStreaming}
-              className="bg-brand hover:bg-brand/90 active:bg-brand/80 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg p-2.5 transition-colors"
+              className="bg-brand hover:bg-brand/90 active:bg-brand/80 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg p-1.5 transition-colors"
               title="Pointed capture (text or container)"
               data-testid="pointed-capture-button"
             >
@@ -230,12 +350,22 @@ export function MaestraCard({
             </button>
             <button
               type="button"
-              onClick={() => {
-                // Screengrab capture logic (placeholder)
-                console.log('Screengrab capture triggered');
-              }}
-              className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600 rounded-lg transition-colors"
-              title="Screengrab capture"
+              disabled={screenshotStatus === 'capturing'}
+              onClick={handleCameraClick}
+              className={`p-2 rounded-lg transition-colors ${
+                screenshotStatus === 'capturing' 
+                  ? 'text-yellow-400 animate-pulse' 
+                  : screenshotStatus === 'success'
+                  ? 'text-green-400 bg-green-400/20'
+                  : screenshotStatus === 'error'
+                  ? 'text-red-400 bg-red-400/20'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600'
+              }`}
+              title={
+                screenshotStatus === 'success' 
+                  ? (captureType === 'code' ? 'Context copied!' : 'Screenshot copied!') 
+                  : 'Click: Screenshot | Double-click: Code capture'
+              }
               data-testid="screengrab-capture-button"
             >
               <Camera size={16} />
