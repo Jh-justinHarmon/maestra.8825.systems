@@ -47,6 +47,7 @@ from learning_loop import (
     record_feedback, record_quality_score, get_feedback_summary,
     get_routing_accuracy, get_mcp_performance
 )
+from identity import get_identity
 
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
@@ -149,6 +150,16 @@ async def add_request_id(request: Request, call_next):
 # ============================================================================
 # Endpoints
 # ============================================================================
+
+@app.get("/identity")
+async def get_backend_identity():
+    """
+    Backend Identity endpoint.
+    Returns cryptographic identity for backend sync protocol.
+    """
+    identity = get_identity(backend_type="hosted")
+    return identity.to_dict()
+
 
 @app.get("/health")
 async def health_check() -> HealthResponse:
