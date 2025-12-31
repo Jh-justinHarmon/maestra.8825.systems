@@ -4,9 +4,21 @@ import type { Adapter, Response, ContextResult, CaptureResult, Context } from '.
 // Maestra Backend API endpoint
 // In production: https://maestra-backend-8825-systems.fly.dev
 // In development: http://localhost:8000
-const API_BASE =
-  (import.meta as any)?.env?.VITE_MAESTRA_API ||
-  'https://maestra-backend-8825-systems.fly.dev';
+// Can be overridden at runtime via localStorage (set by Header debug panel)
+const getApiBase = () => {
+  // Check for runtime override first (set by debug panel)
+  if (typeof window !== 'undefined') {
+    const override = localStorage.getItem('maestra_api_override');
+    if (override) {
+      return override;
+    }
+  }
+  // Fall back to env var or production
+  return (import.meta as any)?.env?.VITE_MAESTRA_API ||
+    'https://maestra-backend-8825-systems.fly.dev';
+};
+
+const API_BASE = getApiBase();
 
 // Local companion service (runs on user's machine)
 const LOCAL_COMPANION_BASE = 'http://localhost:8826';
