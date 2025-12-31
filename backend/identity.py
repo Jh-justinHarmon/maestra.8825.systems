@@ -91,14 +91,21 @@ class BackendIdentity:
             )
             public_key_obj = private_key_obj.public_key()
             
-            # Store private key in keychain
+            # Store private key (only for local backends with keychain)
             private_key_pem = private_key_obj.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption()
             ).decode()
             
-            keychain.store_private_key(self.backend_id, private_key_pem)
+            if self.backend_type == "local":
+                try:
+                    from keychain import KeychainManager
+                    keychain = KeychainManager()
+                    keychain.store_private_key(self.backend_id, private_key_pem)
+                except Exception:
+                    # Keychain storage failed, key will be regenerated on restart
+                    pass
         
         # Serialize keys to PEM format
         public_key_pem = public_key_obj.public_bytes(
