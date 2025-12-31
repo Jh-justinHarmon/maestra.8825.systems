@@ -4,7 +4,7 @@ import type { Adapter, Response, ContextResult, CaptureResult, Context } from '.
 // Maestra Backend API endpoint
 // In production: https://maestra-backend-8825-systems.fly.dev
 // In development: http://localhost:8000
-const API_BASE = process.env.REACT_APP_MAESTRA_API || 'https://maestra-backend-8825-systems.fly.dev';
+const API_BASE = process.env.REACT_APP_MAESTRA_API || 'http://localhost:8000';
 
 // Local companion service (runs on user's machine)
 const LOCAL_COMPANION_BASE = 'http://localhost:8826';
