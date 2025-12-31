@@ -48,6 +48,7 @@ from learning_loop import (
     get_routing_accuracy, get_mcp_performance
 )
 from identity import get_identity
+from sbt import SessionBindingToken, get_peer_registry
 
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
@@ -159,6 +160,66 @@ async def get_backend_identity():
     """
     identity = get_identity(backend_type="hosted")
     return identity.to_dict()
+
+
+@app.post("/register-peer")
+async def register_peer(request: Request):
+    """
+    Register a peer backend using Session Binding Token.
+    
+    Request body:
+    {
+        "sbt": {...},  # Session Binding Token
+        "peer_backend_id": "...",
+        "peer_public_key": "...",
+        "peer_capabilities": [...]
+    }
+    """
+    data = await request.json()
+    
+    # Parse SBT
+    sbt = SessionBindingToken.from_dict(data["sbt"])
+    
+    # Get hosted identity
+    identity = get_identity(backend_type="hosted")
+    
+    # Verify SBT signature using hosted private key (or generate new key if not set)
+    # Note: Hosted backend generates new key on each restart unless BACKEND_PRIVATE_KEY is set
+    if not sbt.is_valid(identity.private_key):
+        raise HTTPException(status_code=401, detail="Invalid SBT signature")
+    
+    # Verify this backend is referenced in the SBT
+    if sbt.hosted_backend_id != identity.backend_id:
+        raise HTTPException(status_code=400, detail="SBT does not reference this backend")
+    
+    # Register the peer
+    peer_registry = get_peer_registry()
+    peer_registry.register_peer(
+        sbt=sbt,
+        peer_backend_id=data["peer_backend_id"],
+        peer_public_key=data["peer_public_key"],
+        peer_capabilities=data["peer_capabilities"]
+    )
+    
+    logger.info(f"Registered peer: {data['peer_backend_id']}")
+    
+    return {
+        "status": "registered",
+        "peer_backend_id": data["peer_backend_id"],
+        "hosted_backend_id": identity.backend_id,
+        "sbt_id": sbt.sbt_id
+    }
+
+
+@app.get("/peers")
+async def list_peers():
+    """
+    List all registered peer backends.
+    """
+    peer_registry = get_peer_registry()
+    return {
+        "peers": peer_registry.list_peers()
+    }
 
 
 @app.get("/health")
