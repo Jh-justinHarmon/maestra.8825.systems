@@ -49,7 +49,9 @@ class AdvisorAskResponse(BaseModel):
     sources: List[SourceReference] = Field(default_factory=list, description="Sources used to generate the answer")
     trace_id: str = Field(..., description="Unique trace ID for debugging")
     mode: str = Field(..., description="Mode used: quick or deep")
-    processing_time_ms: int = Field(..., description="Processing time in milliseconds")
+    processing_time_ms: int = Field(default=0, description="Processing time in milliseconds")
+    conversation_id: Optional[str] = Field(None, description="Loaded conversation ID (if loading a conversation)")
+    turns: Optional[List[dict]] = Field(None, description="Conversation turns (if loading a conversation)")
 
 
 # ============================================================================
@@ -135,6 +137,3 @@ class HealthResponse(BaseModel):
     version: str
     timestamp: datetime
     dependencies: dict = Field(default_factory=dict, description="Status of dependent services")
-    daily_llm_calls: Optional[int] = Field(None, description="Number of LLM calls today")
-    daily_quota: Optional[int] = Field(None, description="Daily LLM call quota")
-    quota_usage_pct: Optional[float] = Field(None, description="Percentage of daily quota used")

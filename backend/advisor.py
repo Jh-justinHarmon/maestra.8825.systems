@@ -38,22 +38,57 @@ MEMORY_HUB_URL = os.getenv("MEMORY_HUB_URL", "http://localhost:8826")
 DEEP_RESEARCH_URL = os.getenv("DEEP_RESEARCH_URL", "http://localhost:8827")
 
 
+# 8825 Core Knowledge - loaded once at module level
+_8825_KNOWLEDGE = None
+
+def _load_8825_knowledge() -> str:
+    """Load 8825 manifesto and philosophy from strategic docs."""
+    global _8825_KNOWLEDGE
+    if _8825_KNOWLEDGE is not None:
+        return _8825_KNOWLEDGE
+    
+    knowledge_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "docs", "strategic", "MANIFESTO_PHILOSOPHY_STRATEGIC_REFERENCE.md"
+    )
+    
+    try:
+        with open(knowledge_path, 'r') as f:
+            _8825_KNOWLEDGE = f.read()
+        logger.info(f"Loaded 8825 knowledge: {len(_8825_KNOWLEDGE)} chars")
+    except Exception as e:
+        logger.warning(f"Could not load 8825 knowledge: {e}")
+        _8825_KNOWLEDGE = ""
+    
+    return _8825_KNOWLEDGE
+
+
 async def get_context_from_brain(topic: str, focus: str = "global") -> Tuple[str, List[SourceReference]]:
     """
-    Get context from Jh Brain on a topic.
+    Get context from 8825 knowledge base.
     
-    In production, this calls mcp8_jh_brain_get_context.
+    Loads manifesto, philosophy, and strategic reference for context.
     """
-    # Simulated response - in production, call Jh Brain MCP
-    # This would be: result = await jh_brain_get_context(topic=topic, focus=focus)
+    knowledge = _load_8825_knowledge()
     
-    context = f"Context retrieved for: {topic}"
+    # Extract relevant sections based on topic keywords
+    topic_lower = topic.lower()
+    context_parts = []
+    
+    # Always include core manifesto for 8825-related queries
+    if any(kw in topic_lower for kw in ['8825', 'maestra', 'philosophy', 'context', 'ai', 'work', 'help']):
+        # Include key sections
+        context_parts.append("8825 CORE KNOWLEDGE:\n")
+        context_parts.append(knowledge[:4000])  # First 4000 chars covers manifesto + pillars
+    
+    context = "\n".join(context_parts) if context_parts else f"Topic: {topic}"
+    
     sources = [
         SourceReference(
-            title="Jh Brain Context",
+            title="8825 Manifesto & Philosophy",
             type="knowledge",
-            confidence=0.8,
-            excerpt=f"Retrieved context for topic: {topic}"
+            confidence=0.95,
+            excerpt="Core 8825 philosophy: AI amplifies people, context is power, collaboration over automation"
         )
     ]
     
@@ -62,20 +97,28 @@ async def get_context_from_brain(topic: str, focus: str = "global") -> Tuple[str
 
 async def get_guidance_from_brain(request: str, task_type: str = "analyze") -> Tuple[str, List[SourceReference]]:
     """
-    Get philosophy-based guidance from Jh Brain.
+    Get philosophy-based guidance from 8825 principles.
     
-    In production, this calls mcp8_jh_brain_guidance.
+    Applies 8825 brand voice and philosophy to guide responses.
     """
-    # Simulated response - in production, call Jh Brain MCP
-    # This would be: result = await jh_brain_guidance(request=request, task_type=task_type)
+    guidance = """
+8825 RESPONSE GUIDELINES:
+- Be direct, specific, and helpful
+- AI amplifies people, doesn't replace them
+- Context is power - use what you know about the user's situation
+- Collaboration over automation
+- Real work > theoretical frameworks
+- Never be cold, robotic, or jargon-heavy
+- Sound confident but never arrogant
+- If you don't know something, say so clearly
+"""
     
-    guidance = f"Guidance for: {request}"
     sources = [
         SourceReference(
             title="8825 Philosophy",
             type="protocol",
             confidence=0.9,
-            excerpt="Applied 8825 principles to generate guidance"
+            excerpt="Applied 8825 principles: amplify people, context is power, collaboration over automation"
         )
     ]
     
@@ -115,9 +158,48 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     Routes to appropriate MCPs based on query type.
     Maintains session continuity across turns.
     """
+    import re
+    
     start_time = time.time()
     trace_id = str(uuid.uuid4())
     question = request.get_question
+    
+    # Check if the message looks like a session_id or conversation reference
+    # Accept: session_ids, UUIDs, or "load <id>" format
+    load_match = re.match(r'^(?:load\s+)?([a-zA-Z0-9_-]+)$', question.strip(), re.IGNORECASE)
+    if load_match:
+        potential_id = load_match.group(1)
+        # Try to load this as a session
+        from session_continuity import continuity_tracker
+        session = continuity_tracker.get_session_state(potential_id)
+        if session.turns:
+            # Return the loaded conversation
+            return AdvisorAskResponse(
+                answer=f"Loaded conversation '{potential_id}' with {len(session.turns)} turns",
+                trace_id=trace_id,
+                session_id=request.session_id,
+                mode="quick",
+                sources=[
+                    SourceReference(
+                        title="Conversation History",
+                        type="conversation",
+                        confidence=1.0,
+                        excerpt=f"{len(session.turns)} turns loaded"
+                    )
+                ],
+                conversation_id=potential_id,
+                turns=[t.to_dict() for t in session.turns]
+            )
+        else:
+            return AdvisorAskResponse(
+                answer=f"Conversation '{potential_id}' not found or is empty",
+                trace_id=trace_id,
+                session_id=request.session_id,
+                mode="quick",
+                sources=[],
+                conversation_id=potential_id,
+                turns=[]
+            )
     
     all_sources: List[SourceReference] = []
     
@@ -144,7 +226,7 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     routing = route_query(question, session_capabilities)
     logger.info(f"Query routed to: {routing['primary_capability']} (pattern: {routing['pattern']})")
 
-    # Client-provided context (e.g., from local companion) is the primary context source in prod.
+    # Client-provided context (e.g., from extension/local companion) is the primary context source in prod.
     client_context_text = ""
     if request.client_context:
         try:
@@ -170,6 +252,39 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
             selection = request.client_context.get("selection") if isinstance(request.client_context, dict) else None
             if selection:
                 client_context_text += f"\n\nUser Selection:\n{selection}\n"
+
+            # Extension/browser snapshot (authoritative description of what the user is seeing)
+            page_snapshot = request.client_context.get("page_snapshot") if isinstance(request.client_context, dict) else None
+            if isinstance(page_snapshot, dict) and page_snapshot:
+                ps_url = page_snapshot.get("url")
+                ps_title = page_snapshot.get("title")
+                ps_domain = page_snapshot.get("domain")
+                ps_timestamp = page_snapshot.get("timestamp")
+                ps_selection = page_snapshot.get("selection")
+                ps_visible_text = page_snapshot.get("visible_text")
+
+                # Some clients may also send visible_text at top-level
+                if not ps_visible_text and isinstance(request.client_context, dict):
+                    ps_visible_text = request.client_context.get("visible_text")
+
+                client_context_text += "\n\nPAGE SNAPSHOT (AUTHORITATIVE):\n"
+                if ps_domain or ps_title:
+                    client_context_text += f"Domain: {ps_domain or ''}\nTitle: {ps_title or ''}\n"
+                if ps_url:
+                    client_context_text += f"URL: {ps_url}\n"
+                if ps_timestamp:
+                    client_context_text += f"Captured At: {ps_timestamp}\n"
+                if ps_selection:
+                    client_context_text += f"\nSelection on page:\n{str(ps_selection)[:2000]}\n"
+                if ps_visible_text:
+                    client_context_text += f"\nVisible text (viewport, truncated):\n{str(ps_visible_text)[:4000]}\n"
+
+                all_sources.append(SourceReference(
+                    title="Page Snapshot (extension)",
+                    type="page_snapshot",
+                    confidence=0.95,
+                    excerpt=f"{(ps_domain or '')} {(ps_title or '')}".strip()[:500]
+                ))
         except Exception:
             # Best effort; proceed without client context
             pass
@@ -208,24 +323,40 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     ))
     
     system_prompt = (
-        "You are Maestra, an expert assistant for operations, execution, and planning. "
-        "Be direct, specific, and helpful. If context is insufficient, ask 1-2 focused questions. "
-        "Do not mention internal implementation details."
+        "You are Maestra, the AI assistant for 8825 - a platform that amplifies human operators with AI.\n\n"
+        f"{guidance}\n\n"
+        f"{context}\n\n"
+        "IMPORTANT: If the user provides a PAGE SNAPSHOT in the request (domain/url/title/visible text/selection), "
+        "treat it as an authoritative description of what they are seeing. Use it to answer questions like "
+        "'what website am I on' or 'can you see what I am seeing' without guessing. "
+        "If no snapshot is provided, say you don't have enough context and ask 1-2 focused questions."
     )
 
-    user_prompt = (
-        f"User question:\n{question}\n\n"
-        f"Session summary (best-effort):\n{previous_context.get('session_summary', '')}\n\n"
-        f"Recent turns (best-effort):\n{str(previous_context.get('recent_turns', []))[:1500]}\n"
-    )
+    user_prompt = f"User question: {question}"
+    
+    # Add conversation history if available
+    if previous_context.get('recent_turns'):
+        user_prompt += f"\n\nRecent conversation:\n{str(previous_context.get('recent_turns', []))[:1500]}"
 
     if client_context_text:
-        user_prompt += f"\n\n{client_context_text}\n"
+        user_prompt += f"\n\nAdditional context:\n{client_context_text}"
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
+
+    # Record user message in session continuity (for conversation feed)
+    add_turn(
+        session_id=request.session_id,
+        turn_id=f"{trace_id}_user",
+        turn_type="user_query",
+        content=question,
+        metadata={
+            "mode": request.mode,
+            "has_page_snapshot": bool(request.client_context and request.client_context.get('page_snapshot'))
+        }
+    )
 
     # LLM synthesis (OpenRouter default; OpenAI/Anthropic fallbacks)
     answer = await chat_completion(messages=messages)
