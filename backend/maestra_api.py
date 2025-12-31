@@ -10,10 +10,15 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
 
-try:
-    from .maestra_bridge import MaestraBridge
-except ImportError:
-    from maestra_bridge import MaestraBridge
+import sys
+from pathlib import Path
+
+# Add conversation_hub to path
+conversation_hub_path = Path(__file__).parent.parent.parent.parent / "users/justin_harmon/8825-Jh/8825_core/conversation_hub"
+if conversation_hub_path.exists():
+    sys.path.insert(0, str(conversation_hub_path))
+
+from maestra_bridge import MaestraBridge
 
 logger = logging.getLogger(__name__)
 

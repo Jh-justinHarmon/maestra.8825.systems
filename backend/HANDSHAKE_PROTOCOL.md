@@ -9,35 +9,44 @@
 ## Overview
 
 The Handshake Protocol enables secure, authenticated communication between:
-- **Hosted Maestra** (public, on Fly.io)
+- **Maestra UI** (public on Fly.io, or local dev at localhost:5000)
 - **Local Companion Service** (user's machine, port 8826)
-- **Maestra Backend** (Fly.io, validates handshakes)
+- **Maestra Backend** (Fly.io production, or local single-port gateway at localhost:8825)
 
 This allows alpha users with local 8825 libraries to unlock advanced features while maintaining security (no raw library/Dropbox exposure).
+
+### Single-Port Gateway Update (v1.1)
+
+With the consolidated single-port local gateway, development workflows now support:
+- **Local Development:** UI (localhost:5000) → Backend (localhost:8825) → Conversation Hub
+- **Production:** UI (maestra.8825.systems) → Backend (Fly.io) → Conversation Hub
+- **Local Companion:** Always on localhost:8826 (independent of backend location)
 
 ---
 
 ## Architecture
 
+### Production Setup
+
 ```
-┌─────────────────────┐
-│  Maestra UI         │
-│  (Fly.io)           │
-└──────────┬──────────┘
+┌─────────────────────────────────────┐
+│  Maestra UI                         │
+│  (maestra.8825.systems on Fly.io)   │
+└──────────┬──────────────────────────┘
            │
            ├─→ Request 1: POST /handshake (to localhost:8826)
-           │   (parallel)
+           │   (parallel, non-blocking)
            │
            └─→ Request 2: POST /api/maestra/advisor/ask (to Fly.io)
-               (parallel)
+               (parallel, required)
 
 ┌──────────────────────────────────────────────────────────────┐
-│ Local Machine                                                │
+│ Local Machine (User's Computer)                              │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │ Local Companion Service (port 8826)                    │ │
-│  │                                                        │ │
+│  │                                                        │
 │  │ - Reads 8825 library (iCloud SQLite)                  │ │
 │  │ - Accesses Jh Brain (port 5160)                       │ │
 │  │ - Runs MCPs (stdio)                                   │ │
@@ -47,16 +56,62 @@ This allows alpha users with local 8825 libraries to unlock advanced features wh
 └──────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
-│ Fly.io (Hosted)                                              │
+│ Fly.io (Hosted Backend)                                      │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ Maestra Backend                                        │ │
-│  │                                                        │ │
+│  │ Maestra Backend (maestra-backend-8825-systems.fly.dev) │ │
+│  │                                                        │
 │  │ - Verifies JWT from handshake                         │ │
 │  │ - Tracks session capabilities                         │ │
 │  │ - Calls LLM with context from local companion         │ │
-│  │ - Streams response back to UI                         │ │
+│  │ - Persists conversations to Conversation Hub          │ │
+│  │ - Returns response to UI                              │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Local Development Setup (Single-Port Gateway)
+
+```
+┌──────────────────────────────────────┐
+│  Maestra UI (Dev)                    │
+│  (localhost:5000)                    │
+└──────────┬───────────────────────────┘
+           │
+           ├─→ Request 1: POST /handshake (to localhost:8826)
+           │   (parallel, non-blocking)
+           │
+           └─→ Request 2: POST /api/maestra/advisor/ask (to localhost:8825)
+               (parallel, required)
+
+┌──────────────────────────────────────────────────────────────┐
+│ Local Machine (Developer's Computer)                         │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Local Companion Service (port 8826)                    │ │
+│  │ - Reads 8825 library (iCloud SQLite)                  │ │
+│  │ - Accesses Jh Brain (port 5160)                       │ │
+│  │ - Runs MCPs (stdio)                                   │ │
+│  │ - Returns summaries (not raw data)                    │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Single-Port Local Gateway (port 8825)                  │ │
+│  │ - Maestra Backend (FastAPI)                           │ │
+│  │ - ConversationHub integration                         │ │
+│  │ - /conversation/* endpoints                           │ │
+│  │ - /api/maestra/advisor/ask endpoint                   │ │
+│  │ - Loads team LLM env (OpenRouter, OpenAI, Anthropic)  │ │
+│  │ - Persists to ~/.8825/conversations/                  │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ ConversationHub Storage                                │ │
+│  │ - ~/.8825/conversations/main.json                      │ │
+│  │ - ~/.8825/conversations/index.json                     │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
@@ -66,26 +121,38 @@ This allows alpha users with local 8825 libraries to unlock advanced features wh
 
 ## Handshake Flow
 
-### Step 1: UI Detects Local Companion
+### Step 1: UI Detects Local Companion & Backend
 
-**Trigger:** User opens maestra.8825.systems
+**Trigger:** User opens Maestra UI (production or local dev)
+
+**Backend Detection:**
+```javascript
+// Determine backend URL based on environment
+const API_BASE = 
+  process.env.VITE_MAESTRA_API ||  // Set to localhost:8825 for local dev
+  'https://maestra-backend-8825-systems.fly.dev';  // Default to production
+
+// For local development:
+// export VITE_MAESTRA_API=http://localhost:8825
+```
 
 **UI Action:**
 ```javascript
-// Try to reach local companion (non-blocking)
+// Try to reach local companion (non-blocking, 1s timeout)
 const handshakePromise = fetch('http://localhost:8826/handshake', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     version: '1',
     user_agent: 'maestra-ui/1.0'
-  })
+  }),
+  signal: AbortSignal.timeout(1000)
 })
   .then(r => r.json())
   .catch(() => null); // Timeout or error = no local companion
 
 // Fire backend request in parallel (doesn't wait for local)
-const backendPromise = fetch('https://maestra-backend-8825-systems.fly.dev/api/maestra/advisor/ask', {
+const backendPromise = fetch(`${API_BASE}/api/maestra/advisor/ask`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -101,6 +168,12 @@ const [handshakeResult, backendResponse] = await Promise.all([
   backendPromise
 ]);
 ```
+
+**Key Points:**
+- Backend URL is configurable via `VITE_MAESTRA_API` environment variable
+- Local companion detection is always non-blocking (1s timeout)
+- Backend request is required; local companion is optional
+- Works identically in production and local development
 
 ### Step 2: Local Companion Responds
 
@@ -355,20 +428,138 @@ GET http://localhost:8826/proactive-suggestions
 
 ---
 
+## Local Development Setup
+
+### Single-Port Gateway Configuration
+
+For local development with the consolidated single-port gateway:
+
+**1. Start the local backend (port 8825):**
+```bash
+cd 8825_core/tools/maestra_backend
+launchctl load ~/Library/LaunchAgents/com.8825.maestra-backend.plist
+# Or manually:
+python3 -m uvicorn server:app --host 0.0.0.0 --port 8825
+```
+
+**2. Configure UI to use local backend:**
+```bash
+cd apps/maestra.8825.systems
+export VITE_MAESTRA_API=http://localhost:8825
+npm run dev
+# UI will be available at http://localhost:5000
+```
+
+**3. Verify local backend is running:**
+```bash
+curl http://localhost:8825/openapi.json | jq '.info.title'
+# Expected: "8825 Backend"
+```
+
+**4. Test single-port gateway endpoints:**
+```bash
+# Test /conversation/ask
+curl -s -X POST http://localhost:8825/conversation/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "conversation_id": "main",
+    "message": "test",
+    "user_id": "dev",
+    "surface_id": "web",
+    "mode": "quick"
+  }' | jq .
+
+# Test /conversation/context
+curl -s -X POST http://localhost:8825/conversation/context \
+  -H "Content-Type: application/json" \
+  -d '{"conversation_id": "main", "max_messages": 5}' | jq .
+```
+
+### Environment Variables
+
+**Frontend (.env.local):**
+```bash
+VITE_MAESTRA_API=http://localhost:8825  # Local backend
+# or
+VITE_MAESTRA_API=https://maestra-backend-8825-systems.fly.dev  # Production
+```
+
+**Backend (8825-Team/config/secrets/llm.env):**
+```bash
+OPENROUTER_API_KEY=sk-or-...
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+LLM_PROVIDER=openrouter
+LLM_MODEL=openrouter/meta-llama/llama-3.1-70b-instruct
+```
+
+### Conversation Persistence
+
+Conversations are stored locally during development:
+```bash
+# View conversation storage
+ls -la ~/.8825/conversations/
+
+# Inspect a conversation
+cat ~/.8825/conversations/main.json | jq .
+
+# Clear conversations (if needed)
+rm -rf ~/.8825/conversations/*
+```
+
+### Debugging
+
+**Check backend logs:**
+```bash
+tail -f /tmp/maestra_backend.log
+tail -f /tmp/maestra_backend.error.log
+```
+
+**Verify local companion (if available):**
+```bash
+curl -s -X POST http://localhost:8826/handshake \
+  -H "Content-Type: application/json" \
+  -d '{"version": "1", "user_agent": "test"}' | jq .
+```
+
+**Check conversation hub import:**
+```bash
+python3 -c "from conversation_hub import ConversationHub; print('OK')"
+```
+
+---
+
 ## Implementation Checklist
 
-- [ ] Local companion: `/handshake` endpoint
-- [ ] Local companion: `/context-for-query` endpoint
-- [ ] Local companion: `/open-loops` endpoint
-- [ ] Local companion: `/proactive-suggestions` endpoint
-- [ ] Backend: JWT verification in `session_manager.py`
-- [ ] Backend: `PUT /session/{id}/capabilities` endpoint
-- [ ] UI: Parallel handshake + advisor request
-- [ ] UI: Context forwarding to streaming connection
-- [ ] UI: "Offline mode" indicator
-- [ ] Tests: E2E handshake flow
-- [ ] Tests: JWT expiration handling
-- [ ] Tests: Network timeout handling
+### Local Companion (Port 8826)
+- [ ] `/handshake` endpoint (returns JWT + capabilities)
+- [ ] `/context-for-query` endpoint (returns K-IDs + summary)
+- [ ] `/open-loops` endpoint (returns open loops)
+- [ ] `/proactive-suggestions` endpoint (returns suggestions)
+
+### Backend (Port 8825 local / Fly.io production)
+- [x] JWT verification in session management
+- [x] `PUT /session/{id}/capabilities` endpoint
+- [x] `/api/maestra/advisor/ask` endpoint (canonical)
+- [x] `/conversation/ask` endpoint (single-port gateway)
+- [x] `/conversation/context` endpoint (single-port gateway)
+- [x] `/conversation/sync` endpoint (single-port gateway)
+- [x] ConversationHub integration
+- [x] Team LLM env loading
+
+### UI (Frontend)
+- [x] Parallel handshake + advisor request
+- [x] Backend URL configuration via VITE_MAESTRA_API
+- [x] Conversation history passing in client_context
+- [x] Graceful degradation without local companion
+- [ ] "Offline mode" indicator (future)
+
+### Testing
+- [ ] E2E handshake flow (local + production)
+- [ ] JWT expiration handling
+- [ ] Network timeout handling
+- [ ] Local development workflow
+- [ ] Cross-surface conversation continuity
 
 ---
 
