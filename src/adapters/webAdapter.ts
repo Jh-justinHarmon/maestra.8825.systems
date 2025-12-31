@@ -4,7 +4,9 @@ import type { Adapter, Response, ContextResult, CaptureResult, Context } from '.
 // Maestra Backend API endpoint
 // In production: https://maestra-backend-8825-systems.fly.dev
 // In development: http://localhost:8000
-const API_BASE = process.env.REACT_APP_MAESTRA_API || 'https://maestra-backend-8825-systems.fly.dev';
+const API_BASE =
+  (import.meta as any)?.env?.VITE_MAESTRA_API ||
+  'https://maestra-backend-8825-systems.fly.dev';
 
 // Local companion service (runs on user's machine)
 const LOCAL_COMPANION_BASE = 'http://localhost:8826';
@@ -82,6 +84,48 @@ export const webAdapter: Adapter = {
     try {
       // Fire parallel requests: handshake + backend (non-blocking)
       const handshakePromise = attemptHandshake();
+
+      // Best-effort local context fetch (fast timeout so we don't block UX)
+      const localContextPromise = (async () => {
+        try {
+          const handshake = await handshakePromise;
+          if (!handshake?.capabilities?.includes('context_for_query')) {
+            return null;
+          }
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 500);
+
+          const response = await fetch(
+            `${LOCAL_COMPANION_BASE}/context-for-query?q=${encodeURIComponent(message)}`,
+            { signal: controller.signal }
+          );
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            return null;
+          }
+
+          const data = await response.json();
+          return {
+            summary: data.summary,
+            relevant: data.relevant_k_ids,
+            selection: context?.selection,
+          };
+        } catch (error) {
+          return null;
+        }
+      })();
+
+      const localContextTimeout = new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 600);
+      });
+
+      const localContext = await Promise.race([localContextPromise, localContextTimeout]);
+
+      const fallbackContext = context?.selection ? { selection: context.selection } : null;
+      const clientContext = localContext || fallbackContext;
       
       const backendPromise = fetch(`${API_BASE}/api/maestra/advisor/ask`, {
         method: 'POST',
@@ -91,6 +135,7 @@ export const webAdapter: Adapter = {
           question: message,
           mode: 'quick',
           context_hints: context?.selection ? ['selection'] : [],
+          client_context: clientContext,
         }),
       });
       
