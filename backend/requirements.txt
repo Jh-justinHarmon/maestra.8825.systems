@@ -6,3 +6,4 @@ pyjwt>=2.8.0
 keyring>=25.0.0
 cryptography>=44.0.0
 requests>=2.31.0
+asyncpg>=0.29.0

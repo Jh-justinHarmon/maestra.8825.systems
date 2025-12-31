@@ -50,6 +50,7 @@ from learning_loop import (
 from identity import get_identity
 from sbt import SessionBindingToken, get_peer_registry
 from sync import ConversationSyncer, SyncScheduler, SyncPayload, set_sync_scheduler
+from database import get_db_manager
 
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
@@ -136,6 +137,24 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup"""
+    # Initialize database
+    db = get_db_manager()
+    await db.initialize()
+    logger.info("✓ Database initialized")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    # Close database connections
+    db = get_db_manager()
+    await db.close()
+    logger.info("✓ Database connections closed")
+
+
 # ============================================================================
 # Middleware
 # ============================================================================
@@ -192,7 +211,7 @@ async def register_peer(request: Request):
     # The peer registration itself establishes trust via the SBT metadata
     # In production, would verify SBT signature using local backend's public key
     
-    # Register the peer
+    # Register the peer in memory
     peer_registry = get_peer_registry()
     peer_registry.register_peer(
         sbt=sbt,
@@ -201,13 +220,21 @@ async def register_peer(request: Request):
         peer_capabilities=data["peer_capabilities"]
     )
     
+    # Persist to database
+    db = get_db_manager()
+    await db.register_peer(
+        backend_id=data["peer_backend_id"],
+        sbt=sbt.to_dict(),
+        public_key=data["peer_public_key"],
+        capabilities=data["peer_capabilities"]
+    )
+    
     logger.info(f"Registered peer: {data['peer_backend_id']}")
     
     return {
         "status": "registered",
-        "peer_backend_id": data["peer_backend_id"],
-        "hosted_backend_id": identity.backend_id,
-        "sbt_id": sbt.sbt_id
+        "sbt_id": sbt.sbt_id,
+        "peer_backend_id": data["peer_backend_id"]
     }
 
 
@@ -228,10 +255,6 @@ async def sync_conversations(request: Request):
     Receive and merge conversations from a peer backend.
     
     Request body: SyncPayload with conversations to merge
-    
-    Note: Hosted backend doesn't have ConversationHub, so this is a stub
-    that acknowledges sync but doesn't persist. In production, hosted
-    backend would use a database for conversation storage.
     """
     data = await request.json()
     sync_payload = SyncPayload.from_dict(data)
@@ -244,21 +267,53 @@ async def sync_conversations(request: Request):
     if not peer_registry.is_peer_registered(sync_payload.source_backend_id):
         raise HTTPException(status_code=403, detail="Peer not registered")
     
-    logger.info(
-        f"Received sync from {sync_payload.source_backend_id}: "
-        f"{len(sync_payload.conversations)} conversations"
-    )
+    # Persist conversations to database
+    db = get_db_manager()
+    merged = 0
+    updated = 0
+    skipped = 0
     
-    # TODO: In production, persist to database
-    # For now, just acknowledge receipt
+    for conversation in sync_payload.conversations:
+        try:
+            # Check if conversation exists
+            existing = await db.get_conversation(conversation['conversation_id'])
+            
+            if existing:
+                # Compare timestamps for Last-Write-Wins
+                existing_ts = datetime.fromisoformat(existing['updated_at'])
+                incoming_ts = datetime.fromisoformat(conversation['updated_at'])
+                
+                if incoming_ts > existing_ts:
+                    # Incoming is newer, update
+                    await db.save_conversation(conversation)
+                    updated += 1
+                else:
+                    # Existing is newer, skip
+                    skipped += 1
+            else:
+                # New conversation, save
+                await db.save_conversation(conversation)
+                merged += 1
+                
+        except Exception as e:
+            logger.error(f"Failed to save conversation {conversation['conversation_id']}: {e}")
+            skipped += 1
+    
+    # Update peer's last sync time
+    await db.update_peer_sync_time(sync_payload.source_backend_id)
+    
+    logger.info(
+        f"Synced from {sync_payload.source_backend_id}: "
+        f"{merged} merged, {updated} updated, {skipped} skipped"
+    )
     
     return {
         "status": "synced",
         "sync_id": sync_payload.sync_id,
         "conversations_received": len(sync_payload.conversations),
-        "conversations_merged": 0,  # Stub: not persisting yet
-        "conversations_updated": 0,
-        "conversations_skipped": len(sync_payload.conversations)
+        "conversations_merged": merged,
+        "conversations_updated": updated,
+        "conversations_skipped": skipped
     }
 
 
