@@ -74,7 +74,7 @@ function AppContent() {
         modeConfidence={modeMatch.confidence}
       />
 
-      <main className="flex-1 p-6 overflow-hidden">
+      <main className="flex-1 p-6 lg:px-[250px] overflow-hidden">
         <div className="h-full max-w-4xl mx-auto">
           <MaestraCard
             variant="full"

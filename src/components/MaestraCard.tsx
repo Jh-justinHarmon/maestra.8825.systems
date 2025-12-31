@@ -96,6 +96,8 @@ export function MaestraCard({
         className="flex-1 overflow-y-auto p-4 space-y-4 relative"
         data-testid="messages-container"
       >
+        {/* Gradient fade overlay for old messages */}
+        <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-zinc-800 to-transparent pointer-events-none z-10" />
         {messages.length === 0 && (
           <div className="flex items-center justify-center h-full text-zinc-500">
             <p>Start a conversation with Maestra...</p>
@@ -110,7 +112,7 @@ export function MaestraCard({
             <div
               className={`max-w-[80%] rounded-lg px-4 py-2 ${
                 message.role === 'user'
-                  ? 'bg-blue-500 text-white'
+                  ? 'bg-brand text-white'
                   : 'bg-zinc-700 text-zinc-100'
               }`}
             >
@@ -152,11 +154,11 @@ export function MaestraCard({
       <div className="p-4 border-t border-zinc-700">
         {selection && (
           <div className="mb-2 flex items-center gap-2">
-            <span className="bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full text-sm flex items-center gap-2">
+            <span className="bg-brand/20 text-brand px-3 py-1 rounded-full text-sm flex items-center gap-2">
               Selection: {wordCount} word{wordCount !== 1 ? 's' : ''}
               <button
                 onClick={() => setSelection(null)}
-                className="hover:text-blue-300 transition-colors"
+                className="hover:text-brand/80 transition-colors"
               >
                 <X size={14} />
               </button>
@@ -171,27 +173,37 @@ export function MaestraCard({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder={captureMode ? "Describe what you want to capture..." : "Type a message..."}
-              className="flex-1 bg-zinc-900 text-zinc-100 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/50 placeholder-zinc-500"
+              className="flex-1 bg-zinc-900 text-zinc-100 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-brand/50 placeholder-zinc-500"
               disabled={isStreaming}
               data-testid="message-input"
             />
             <button
               type="submit"
-              disabled={(captureMode && !inputValue.trim() && !selection) || (!captureMode && !inputValue.trim()) || isStreaming}
-              className="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2.5 transition-colors flex items-center gap-2"
+              disabled={!inputValue.trim() || isStreaming}
+              className="bg-brand hover:bg-brand/90 active:bg-brand/80 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2.5 transition-colors flex items-center gap-2"
               data-testid="send-button"
             >
-              {captureMode ? (
-                <>
-                  <Target size={18} />
-                  Capture
-                </>
-              ) : (
-                <>
-                  <Send size={18} />
-                  Send
-                </>
-              )}
+              <Send size={18} />
+              Send
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!inputValue.trim() && !selection) return;
+                if (onCapture) {
+                  const context: Context = {};
+                  if (selection) context.selection = selection;
+                  onCapture({ content: inputValue || selection || '', context });
+                  setInputValue('');
+                  setSelection(null);
+                }
+              }}
+              disabled={(!inputValue.trim() && !selection) || isStreaming}
+              className="bg-brand hover:bg-brand/90 active:bg-brand/80 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg p-2.5 transition-colors"
+              title="Pointed capture (text or container)"
+              data-testid="pointed-capture-button"
+            >
+              <Target size={18} />
             </button>
           </div>
 
@@ -218,14 +230,13 @@ export function MaestraCard({
             </button>
             <button
               type="button"
-              onClick={() => setCaptureMode(!captureMode)}
-              className={`p-2 rounded-lg transition-colors ${
-                captureMode
-                  ? 'text-blue-400 bg-blue-500/20 hover:bg-blue-500/30 active:bg-blue-500/40'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600'
-              }`}
-              title="Toggle capture mode"
-              data-testid="capture-mode-toggle"
+              onClick={() => {
+                // Screengrab capture logic (placeholder)
+                console.log('Screengrab capture triggered');
+              }}
+              className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600 rounded-lg transition-colors"
+              title="Screengrab capture"
+              data-testid="screengrab-capture-button"
             >
               <Camera size={16} />
             </button>
