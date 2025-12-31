@@ -49,6 +49,7 @@ from learning_loop import (
 )
 from identity import get_identity
 from sbt import SessionBindingToken, get_peer_registry
+from sync import ConversationSyncer, SyncScheduler, SyncPayload, set_sync_scheduler
 
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
@@ -219,6 +220,46 @@ async def list_peers():
     peer_registry = get_peer_registry()
     return {
         "peers": peer_registry.list_peers()
+    }
+
+
+@app.post("/sync")
+async def sync_conversations(request: Request):
+    """
+    Receive and merge conversations from a peer backend.
+    
+    Request body: SyncPayload with conversations to merge
+    
+    Note: Hosted backend doesn't have ConversationHub, so this is a stub
+    that acknowledges sync but doesn't persist. In production, hosted
+    backend would use a database for conversation storage.
+    """
+    data = await request.json()
+    sync_payload = SyncPayload.from_dict(data)
+    
+    # Get identity and peer registry
+    identity = get_identity(backend_type="hosted")
+    peer_registry = get_peer_registry()
+    
+    # Verify peer is registered
+    if not peer_registry.is_peer_registered(sync_payload.source_backend_id):
+        raise HTTPException(status_code=403, detail="Peer not registered")
+    
+    logger.info(
+        f"Received sync from {sync_payload.source_backend_id}: "
+        f"{len(sync_payload.conversations)} conversations"
+    )
+    
+    # TODO: In production, persist to database
+    # For now, just acknowledge receipt
+    
+    return {
+        "status": "synced",
+        "sync_id": sync_payload.sync_id,
+        "conversations_received": len(sync_payload.conversations),
+        "conversations_merged": 0,  # Stub: not persisting yet
+        "conversations_updated": 0,
+        "conversations_skipped": len(sync_payload.conversations)
     }
 
 
