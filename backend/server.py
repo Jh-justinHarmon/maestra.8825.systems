@@ -51,6 +51,7 @@ from identity import get_identity
 from sbt import SessionBindingToken, get_peer_registry
 from sync import ConversationSyncer, SyncScheduler, SyncPayload, set_sync_scheduler
 from database import get_db_manager
+from audit_trail import audit_trail
 
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
@@ -166,6 +167,35 @@ async def add_request_id(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
     return response
+
+
+@app.middleware("http")
+async def audit_trail_middleware(request: Request, call_next):
+    """Track execution in audit trail for all requests."""
+    execution_id = str(uuid.uuid4())
+    source = request.headers.get("user-agent", "unknown")
+    endpoint = f"{request.method} {request.url.path}"
+    
+    audit_trail.start_execution(execution_id, source, endpoint)
+    audit_trail.add_source(source, {
+        "method": request.method,
+        "path": request.url.path,
+        "client": request.client.host if request.client else "unknown"
+    })
+    
+    start_time = time.time()
+    try:
+        response = await call_next(request)
+        duration_ms = (time.time() - start_time) * 1000
+        audit_trail.add_result("Request completed", {"status_code": response.status_code}, duration_ms)
+        audit_trail.end_execution("success")
+        response.headers["X-Execution-ID"] = execution_id
+        return response
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        audit_trail.add_error("Request failed", {"error": str(e)})
+        audit_trail.end_execution("error")
+        raise
 
 
 # ============================================================================
@@ -1234,6 +1264,69 @@ async def notifications_ui():
             content=f"<html><body><h1>Error loading notifications</h1><p>{str(e)}</p></body></html>",
             status_code=500
         )
+
+
+# ============================================================================
+# Audit Trail Endpoints
+# ============================================================================
+
+@app.get("/api/audit/recent")
+async def get_recent_audit_trail(limit: int = 10):
+    """
+    Get recent execution audit trail entries.
+    
+    Returns the last N execution records with sources, operations, and results.
+    """
+    recent = audit_trail.get_recent(limit)
+    return {
+        "count": len(recent),
+        "executions": [
+            {
+                "execution_id": ex.execution_id,
+                "source": ex.source,
+                "endpoint": ex.endpoint,
+                "start_time": ex.start_time,
+                "end_time": ex.end_time,
+                "total_duration_ms": ex.total_duration_ms,
+                "status": ex.status,
+                "entries": [
+                    {
+                        "timestamp": e.timestamp,
+                        "type": e.entry_type,
+                        "label": e.label,
+                        "details": e.details,
+                        "duration_ms": e.duration_ms,
+                    }
+                    for e in ex.entries
+                ],
+            }
+            for ex in recent
+        ],
+    }
+
+
+@app.get("/api/audit/export")
+async def export_audit_trail():
+    """
+    Export full audit trail as JSON.
+    
+    Returns all execution records in JSON format for analysis.
+    """
+    return JSONResponse(
+        content=json.loads(audit_trail.export_json()),
+        media_type="application/json",
+    )
+
+
+@app.post("/api/audit/clear")
+async def clear_audit_trail():
+    """
+    Clear in-memory audit trail history.
+    
+    Note: Persisted files on disk are not deleted.
+    """
+    audit_trail.clear()
+    return {"status": "cleared"}
 
 
 @app.get("/conversations/{conversation_id}")
