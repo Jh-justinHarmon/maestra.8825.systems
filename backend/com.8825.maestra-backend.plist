@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.8825.maestra-backend</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/apps/maestra.8825.systems/backend/maestra_backend_launch.sh</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <string>/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/apps/maestra.8825.systems/backend</string>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    
+    <key>StandardOutPath</key>
+    <string>/tmp/maestra_backend.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/tmp/maestra_backend.error.log</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
