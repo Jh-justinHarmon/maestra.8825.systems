@@ -90,29 +90,31 @@ def test_sync():
     print("\n[Step 1] Creating test conversation on local backend...")
     
     try:
-        from conversation_hub import ConversationHub, MessageRole
+        from conversation_hub import ConversationHub
         
         hub = ConversationHub()
         
         # Create a test conversation
-        conv = hub.create_conversation(
+        conv_id = hub.create_conversation(
             title="Test Sync Conversation",
-            surface="test"
+            source_backend=local_identity['backend_id']
         )
         
         # Add a test message
-        hub.append_message(
-            conversation_id=conv.conversation_id,
-            role=MessageRole.USER,
+        msg_id = hub.add_message(
+            conv_id=conv_id,
             content="This is a test message for sync",
-            metadata={"source_backend": local_identity['backend_id']}
+            source_backend=local_identity['backend_id'],
+            role="user"
         )
         
-        print(f"✓ Created conversation: {conv.conversation_id}")
-        print(f"  Title: {conv.title}")
+        print(f"✓ Created conversation: {conv_id}")
+        print(f"  Message: {msg_id}")
         
     except Exception as e:
         print(f"✗ Failed to create conversation: {e}")
+        import traceback
+        traceback.print_exc()
         return False
     
     # Step 2: Manually trigger sync from local to hosted
