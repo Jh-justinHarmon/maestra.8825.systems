@@ -1,3 +1,4 @@
+/// <reference types="chrome" />
 /**
  * Extension Background Service Worker
  * Handles communication between content script and backend API.
@@ -16,8 +17,27 @@ interface BackgroundMessage {
   payload?: unknown;
 }
 
+interface MessageSender {
+  url?: string;
+  tab?: { id?: number };
+}
+
+interface AdvisorAskPayload {
+  session_id: string;
+  message: string;
+  mode?: 'quick' | 'deep';
+  client_context?: Record<string, unknown>;
+}
+
+const BACKEND_URL = 'http://localhost:8825';
+
+async function getBackendUrl(): Promise<string> {
+  const stored = await chrome.storage.local.get('maestra_backend_url');
+  return stored.maestra_backend_url || BACKEND_URL;
+}
+
 // Listen for messages from content script
-chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender: MessageSender, sendResponse: (response: unknown) => void) => {
   switch (message.type) {
     case 'CAPTURE':
       handleCapture(message.payload as CapturePayload, sendResponse);
@@ -36,26 +56,55 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
 
 async function handleCapture(payload: CapturePayload, sendResponse: (response: unknown) => void) {
   try {
-    // TODO: Send to backend API
-    // const response = await fetch('https://api.8825.systems/capture', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(payload),
-    // });
-    // const result = await response.json();
+    const backendUrl = await getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/maestra/capture`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     
-    console.log('[Background] Capture:', payload);
-    sendResponse({ success: true, id: 'cap_' + Date.now() });
+    if (!response.ok) {
+      throw new Error(`Backend error: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    console.log('[Background] Capture success:', result);
+    sendResponse({ success: true, ...result });
   } catch (error) {
+    console.error('[Background] Capture error:', error);
     sendResponse({ error: (error as Error).message });
   }
 }
 
-async function handleSendMessage(payload: unknown, sendResponse: (response: unknown) => void) {
+async function handleSendMessage(payload: any, sendResponse: (response: any) => void) {
   try {
-    // TODO: Send to backend API
-    console.log('[Background] Send message:', payload);
-    sendResponse({ success: true });
+    const { session_id, message, mode, client_context } = payload;
+    
+    const apiBase = 'http://localhost:8825';
+    console.log('[Maestra Extension] Using backend:', apiBase);
+
+    const response = await fetch(`${apiBase}/api/maestra/advisor/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id,
+        message,
+        mode,
+        client_context,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    sendResponse({
+      success: true,
+      answer: data.answer,
+      trace_id: data.trace_id,
+      sources: data.sources || [],
+    });
   } catch (error) {
     sendResponse({ error: (error as Error).message });
   }
@@ -73,8 +122,72 @@ async function handleGetContext(url: string | undefined, sendResponse: (response
 }
 
 // Handle extension icon click
-chrome.action.onClicked.addListener((tab) => {
-  if (tab.id) {
-    chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_OVERLAY' });
+function isSupportedTabUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  return url.startsWith('http://') || url.startsWith('https://');
+}
+
+function injectContentScript(tabId: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.scripting.executeScript(
+        {
+          target: { tabId },
+          files: ['content/content.js'],
+        },
+        () => {
+          const err = chrome.runtime.lastError;
+          if (err) {
+            reject(new Error(err.message));
+            return;
+          }
+          resolve();
+        }
+      );
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+function sendToTab(tabId: number, message: unknown): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.sendMessage(tabId, message, () => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          reject(new Error(err.message));
+          return;
+        }
+        resolve();
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function toggleOverlay(tab: chrome.tabs.Tab) {
+  if (!tab.id) return;
+  if (!isSupportedTabUrl(tab.url)) {
+    console.warn('[Background] Tab URL not supported for overlay:', tab.url);
+    return;
   }
+
+  try {
+    await sendToTab(tab.id, { type: 'TOGGLE_OVERLAY' });
+  } catch (e) {
+    // Most common case: content script not present yet.
+    console.info('[Background] No content receiver, injecting content script and retrying...');
+    try {
+      await injectContentScript(tab.id);
+      await sendToTab(tab.id, { type: 'TOGGLE_OVERLAY' });
+    } catch (inner) {
+      console.error('[Background] Failed to inject/toggle overlay:', inner);
+    }
+  }
+}
+
+chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
+  void toggleOverlay(tab);
 });

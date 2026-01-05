@@ -52,6 +52,7 @@ from sbt import SessionBindingToken, get_peer_registry
 from sync import ConversationSyncer, SyncScheduler, SyncPayload, set_sync_scheduler
 from database import get_db_manager
 from audit_trail import audit_trail
+from conversation_save_service import save_conversation_from_maestra, save_conversation_from_cascade
 
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
@@ -1364,6 +1365,68 @@ async def get_conversation(conversation_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to load conversation: {str(e)}"
+        )
+
+
+# ============================================================================
+# Conversation Save Endpoint
+# ============================================================================
+
+
+class SaveConversationRequest(BaseModel):
+    """Request to save a conversation"""
+    conversation_id: str
+    title: str
+    messages: list
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+@app.post("/api/maestra/save-conversation")
+async def save_conversation(request: SaveConversationRequest):
+    """
+    Save conversation to 8825 Library
+    
+    Triggered by:
+    1. Save button in Maestra UI
+    2. "Save this convo" NL trigger in Cascade
+    
+    Returns entry_id and verification_query for proof of capture
+    """
+    try:
+        result = save_conversation_from_maestra(
+            conversation_id=request.conversation_id,
+            title=request.title,
+            messages=request.messages,
+            user_id=request.user_id,
+            session_id=request.session_id,
+        )
+        
+        # Log save event
+        audit_trail.log_event(
+            event_type="conversation_saved",
+            action="save",
+            conversation_id=request.conversation_id,
+            actor_id=request.user_id or "anonymous",
+            status="success" if result.get("success") else "failed",
+            details={"entry_id": result.get("entry_id")},
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Save conversation error: {e}", exc_info=True)
+        audit_trail.log_event(
+            event_type="conversation_saved",
+            action="save",
+            conversation_id=request.conversation_id,
+            actor_id=request.user_id or "anonymous",
+            status="error",
+            details={"error": str(e)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save conversation: {str(e)}"
         )
 
 

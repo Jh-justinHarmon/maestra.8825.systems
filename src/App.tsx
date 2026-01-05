@@ -8,13 +8,25 @@ import type { Message, Context, CaptureResult } from './adapters/types';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
+function getOrCreateSessionId(): string {
+  // Check for shared session_id override (from query param or localStorage)
+  const params = new URLSearchParams(window.location.search);
+  const sharedSessionId = params.get('session_id') || localStorage.getItem('maestra_shared_session_id');
+  if (sharedSessionId) {
+    return sharedSessionId;
+  }
+  
+  // Fall back to default
+  return 'main';
+}
+
 function AppContent() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [pins, setPins] = useState<CaptureResult[]>([]);
   const [isPinsOpen, setIsPinsOpen] = useState(false);
   const [showBreadcrumbs, setShowBreadcrumbs] = useState(false);
-  const conversationId = 'main';
+  const conversationId = getOrCreateSessionId();
 
   // Detect current page context and select mode
   const pageContext: PageContext = {
@@ -29,6 +41,33 @@ function AppContent() {
   useEffect(() => {
     trackModeSelected(modeMatch.mode.id, modeMatch.confidence);
   }, [modeMatch.mode.id, modeMatch.confidence]);
+
+  // Poll conversation feed for real-time sync across surfaces
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const apiBase = localStorage.getItem('maestra_api_override') || 'http://localhost:8825';
+        const response = await fetch(`${apiBase}/api/maestra/conversation/${conversationId}`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        if (data.turns && data.turns.length > messages.length) {
+          // New turns arrived; sync them
+          const newMessages = data.turns.map((turn: any) => ({
+            id: turn.turn_id,
+            role: turn.type === 'user_query' ? 'user' as const : 'assistant' as const,
+            content: turn.content,
+            timestamp: turn.timestamp,
+          }));
+          setMessages(newMessages);
+        }
+      } catch (error) {
+        // Silently fail; backend might be offline
+      }
+    }, 1000);
+
+    return () => clearInterval(pollInterval);
+  }, [conversationId, messages.length]);
 
   const handleSendMessage = useCallback(async (content: string, context?: Context) => {
     const userMessage: Message = {

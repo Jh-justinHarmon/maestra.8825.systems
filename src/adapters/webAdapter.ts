@@ -3,8 +3,9 @@ import type { Adapter, Response, ContextResult, CaptureResult, Context } from '.
 
 // Maestra Backend API endpoint
 // In production: https://maestra-backend-8825-systems.fly.dev
-// In development: http://localhost:8000
+// In development: http://localhost:8825 (default)
 // Can be overridden at runtime via localStorage (set by Header debug panel)
+// Or via VITE_MAESTRA_API env var at build time
 const getApiBase = () => {
   // Check for runtime override first (set by debug panel)
   if (typeof window !== 'undefined') {
@@ -13,9 +14,22 @@ const getApiBase = () => {
       return override;
     }
   }
-  // Fall back to env var or production
-  return (import.meta as any)?.env?.VITE_MAESTRA_API ||
-    'https://maestra-backend-8825-systems.fly.dev';
+  
+  // Check env var (set at build time)
+  const envApi = (import.meta as any)?.env?.VITE_MAESTRA_API;
+  if (envApi) {
+    console.log('[Maestra] Using VITE_MAESTRA_API:', envApi);
+    return envApi;
+  }
+  
+  // Default: localhost for dev, production for deployed
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    console.log('[Maestra] Using localhost backend');
+    return 'http://localhost:8825';
+  }
+  
+  console.log('[Maestra] Using production backend');
+  return 'https://maestra-backend-8825-systems.fly.dev';
 };
 
 const API_BASE = getApiBase();
