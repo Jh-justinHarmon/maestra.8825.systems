@@ -159,10 +159,47 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     Maintains session continuity across turns.
     """
     import re
+    import json
+    from pathlib import Path
     
     start_time = time.time()
     trace_id = str(uuid.uuid4())
     question = request.get_question
+    
+    # Check for Entry ID references in the question
+    # Entry IDs are 16-character hex strings like "5ce9e4d4f0f23d90"
+    entry_id_pattern = r'\b([a-f0-9]{16})\b'
+    entry_id_matches = re.findall(entry_id_pattern, question.lower())
+    
+    library_context = ""
+    if entry_id_matches:
+        # Try to load library entries
+        possible_paths = [
+            Path(__file__).parent.parent.parent.parent / "shared" / "8825-library",
+            Path("/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/shared/8825-library"),
+        ]
+        
+        library_dir = None
+        for path in possible_paths:
+            if path.exists():
+                library_dir = path
+                break
+        
+        if library_dir:
+            for entry_id in entry_id_matches:
+                entry_file = library_dir / f"{entry_id}.json"
+                if entry_file.exists():
+                    try:
+                        with open(entry_file, 'r') as f:
+                            entry = json.load(f)
+                        library_context += f"\n\n--- LIBRARY ENTRY {entry_id} ---\n"
+                        library_context += f"Title: {entry.get('title', 'Untitled')}\n"
+                        library_context += f"Source: {entry.get('source', 'unknown')}\n"
+                        library_context += f"Content: {entry.get('content', '')}\n"
+                        library_context += "--- END ENTRY ---\n"
+                        logger.info(f"Loaded library entry: {entry_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load library entry {entry_id}: {e}")
     
     # Check if the message looks like a session_id or conversation reference
     # Accept: session_ids, UUIDs, or "load <id>" format
@@ -190,6 +227,10 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 conversation_id=potential_id,
                 turns=[t.to_dict() for t in session.turns]
             )
+        # Check if it's a library entry ID (16 hex chars)
+        elif re.match(r'^[a-f0-9]{16}$', potential_id.lower()):
+            # Already handled above via library_context, continue to normal processing
+            pass
         else:
             return AdvisorAskResponse(
                 answer=f"Conversation '{potential_id}' not found or is empty",
@@ -329,10 +370,22 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         "IMPORTANT: If the user provides a PAGE SNAPSHOT in the request (domain/url/title/visible text/selection), "
         "treat it as an authoritative description of what they are seeing. Use it to answer questions like "
         "'what website am I on' or 'can you see what I am seeing' without guessing. "
-        "If no snapshot is provided, say you don't have enough context and ask 1-2 focused questions."
+        "If no snapshot is provided, say you don't have enough context and ask 1-2 focused questions.\n\n"
+        "LIBRARY ENTRIES: If the user references an Entry ID (16-character hex string like '5ce9e4d4f0f23d90'), "
+        "the content from that library entry will be provided below. Use it to answer their question with full context."
     )
 
     user_prompt = f"User question: {question}"
+    
+    # Add library context if any Entry IDs were found and loaded
+    if library_context:
+        user_prompt += f"\n\n--- LIBRARY CONTEXT ---{library_context}"
+        all_sources.append(SourceReference(
+            title=f"Library Entries ({len(entry_id_matches)} loaded)",
+            type="library",
+            confidence=0.95,
+            excerpt=f"Entry IDs: {', '.join(entry_id_matches)}"
+        ))
     
     # Add conversation history if available
     if previous_context.get('recent_turns'):

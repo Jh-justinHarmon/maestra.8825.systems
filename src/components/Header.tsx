@@ -1,5 +1,6 @@
  import { Pin, Hexagon, Settings } from 'lucide-react';
 import { useState } from 'react';
+import { ConnectionStatus } from './ConnectionStatus';
 
 interface HeaderProps {
   onTogglePins: () => void;
@@ -55,7 +56,8 @@ export function Header({ onTogglePins, pinsCount, modeId, modeConfidence }: Head
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
+        <ConnectionStatus className="text-sm" />
         <button
           onClick={() => setShowApiDebug(!showApiDebug)}
           className="flex items-center gap-2 px-3 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"

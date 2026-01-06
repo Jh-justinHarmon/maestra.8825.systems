@@ -120,12 +120,142 @@ except Exception as e:
     telemetry = None
     def is_enabled(flag): return os.getenv(f"FEATURE_{flag}", "false").lower() == "true"
 
+# Capability Sidecar Integration
+HAS_SIDECAR = False
+sidecar_client = None
+
+try:
+    # Ensure 8825_core is in path
+    try:
+        from root_finder import get_8825_paths
+    except ImportError:
+        # Fallback if root_finder not yet imported
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "system"))
+        from root_finder import get_8825_paths
+
+    paths = get_8825_paths()
+    CORE_PATH = paths.get("8825_CORE")
+    
+    if CORE_PATH and CORE_PATH not in sys.path:
+        sys.path.insert(0, CORE_PATH)
+        
+    # Import SidecarClient and Auth components
+    from brain.sidecar_client import SidecarClient
+    from auth.memory_native_auth import MemoryNativeAuth, compute_library_fingerprint
+    
+    # Initialize client pointing to local sidecar (port 5160)
+    sidecar_client = SidecarClient(sidecar_url="http://localhost:5160")
+    HAS_SIDECAR = True
+    logger.info("✓ Capability Sidecar client initialized")
+
+except Exception as e:
+    logger.warning(f"Capability Sidecar integration failed: {e}")
+    # Try alternate import path structure if first failed
+    try:
+        # Assuming we are in apps/maestra.../backend
+        # Try to find 8825_core relative to known structure
+        repo_root = Path(__file__).parent.parent.parent.parent
+        # Search for 8825_core
+        found = list(repo_root.glob("**/8825_core/brain/sidecar_client.py"))
+        if found:
+            brain_dir = found[0].parent
+            core_dir = brain_dir.parent
+            if str(core_dir) not in sys.path:
+                sys.path.insert(0, str(core_dir))
+            from brain.sidecar_client import SidecarClient
+            from auth.memory_native_auth import MemoryNativeAuth, compute_library_fingerprint
+            
+            sidecar_client = SidecarClient(sidecar_url="http://localhost:5160")
+            HAS_SIDECAR = True
+            logger.info("✓ Capability Sidecar client initialized (fallback path)")
+    except Exception as e2:
+        logger.error(f"Capability Sidecar completely unavailable: {e2}")
+
 
 app = FastAPI(
     title="Maestra Backend",
     description="Backend service for the Maestra browser extension",
     version="1.0.0"
 )
+
+# ============================================================================
+# Auth Models & Endpoints
+# ============================================================================
+
+class AuthHandshakeRequest(BaseModel):
+    session_id: str
+    auth_anchor_id: str
+    device_id: str
+    tier_preference: int = 0
+    capabilities_requested: list[str]
+
+@app.post("/api/maestra/auth/handshake")
+async def auth_handshake(request: AuthHandshakeRequest):
+    """
+    Perform memory-native authentication handshake.
+    
+    1. Loads user library (Mock: Becky Hammer)
+    2. Validates auth anchor K-entry
+    3. Computes fingerprint
+    4. Delegates to Sidecar for token minting
+    """
+    if not HAS_SIDECAR or not sidecar_client:
+        raise HTTPException(status_code=503, detail="Capability Sidecar unavailable")
+
+    try:
+        # 1. Load Library (Mock for Pilot: Becky Hammer)
+        # In production, this would load from 8825 Library based on user context
+        library_path = Path("/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/users/justin_harmon/8825-Jh/8825_core/auth/becky_library.json")
+        if not library_path.exists():
+             raise HTTPException(status_code=404, detail="User library not found (Pilot: becky_library.json missing)")
+        
+        import json
+        user_library = json.loads(library_path.read_text())
+        
+        # 2. Validate Auth Anchor
+        # We instantiate MemoryNativeAuth with the directory, but validation passes the dict
+        auth_validator = MemoryNativeAuth(str(library_path.parent))
+        
+        if request.auth_anchor_id not in user_library:
+             raise HTTPException(status_code=401, detail="Auth anchor not found in library")
+             
+        auth_entry = user_library[request.auth_anchor_id]
+        
+        is_valid, msg = auth_validator.validate_auth_anchor(
+            k_entry=auth_entry,
+            user_library=user_library,
+            device_id=request.device_id,
+            usage_patterns=None # No history for first run
+        )
+        
+        if not is_valid:
+            logger.warning(f"Auth validation failed for {request.auth_anchor_id}: {msg}")
+            raise HTTPException(status_code=401, detail=f"Authentication failed: {msg}")
+            
+        logger.info(f"✓ Auth anchor {request.auth_anchor_id} validated: {msg}")
+
+        # 3. Call Sidecar for Tokens
+        result = await sidecar_client.handshake(
+            session_id=request.session_id,
+            capabilities_requested=request.capabilities_requested,
+            tier_preference=request.tier_preference,
+            auth_anchor_id=request.auth_anchor_id,
+            user_library=user_library,
+            device_id=request.device_id
+        )
+        
+        if not result.get("success", False):
+             raise HTTPException(status_code=500, detail=result.get("error", "Sidecar handshake failed"))
+             
+        # 4. Return success with tokens
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Auth handshake error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # CORS configuration
 # In production, this is handled by the API Gateway
@@ -369,8 +499,16 @@ async def health_check() -> HealthResponse:
     except Exception:
         dependencies["llm"] = "missing"
     
+    # Check sidecar health
+    if HAS_SIDECAR:
+        sidecar_health = await sidecar_client.health_check()
+        dependencies["capability_sidecar"] = "healthy" if sidecar_health.get("success") else "unhealthy"
+    else:
+        dependencies["capability_sidecar"] = "missing"
+
     # Calculate quota usage
     today = date.today()
+
     daily_calls = llm_call_counter[today]
     quota_usage_pct = (daily_calls / daily_quota * 100) if daily_quota > 0 else 0.0
     
@@ -1428,6 +1566,157 @@ async def save_conversation(request: SaveConversationRequest):
             status_code=500,
             detail=f"Failed to save conversation: {str(e)}"
         )
+
+
+# ============================================================================
+# Library Retrieval Endpoint
+# ============================================================================
+
+@app.get("/api/library/{entry_id}")
+async def get_library_entry(entry_id: str):
+    """
+    Retrieve a knowledge entry from the 8825 Library by ID.
+    
+    Entry IDs are 16-character hex strings (e.g., "5ce9e4d4f0f23d90").
+    Returns the full entry content including title, content, source, and metadata.
+    """
+    import json
+    from pathlib import Path
+    
+    # Determine library path - check multiple locations
+    possible_paths = [
+        # Hosted deployment path (relative to backend)
+        Path(__file__).parent.parent.parent.parent / "shared" / "8825-library",
+        # Local development path
+        Path("/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/shared/8825-library"),
+        # Environment variable override
+        Path(os.getenv("LIBRARY_PATH", "/tmp/8825-library")),
+    ]
+    
+    library_dir = None
+    for path in possible_paths:
+        if path.exists():
+            library_dir = path
+            break
+    
+    if not library_dir:
+        logger.warning("8825 Library directory not found")
+        raise HTTPException(
+            status_code=503,
+            detail="Library service unavailable - directory not found"
+        )
+    
+    # Sanitize entry_id to prevent path traversal
+    if not entry_id.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid entry ID format")
+    
+    entry_file = library_dir / f"{entry_id}.json"
+    
+    if not entry_file.exists():
+        logger.info(f"Library entry not found: {entry_id}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Entry '{entry_id}' not found in library"
+        )
+    
+    try:
+        with open(entry_file, 'r') as f:
+            entry = json.load(f)
+        
+        logger.info(f"Retrieved library entry: {entry_id}")
+        return {
+            "success": True,
+            "entry_id": entry_id,
+            "entry": entry
+        }
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in library entry {entry_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Corrupted entry: {entry_id}"
+        )
+    except Exception as e:
+        logger.error(f"Error reading library entry {entry_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read entry: {str(e)}"
+        )
+
+
+@app.get("/library/{entry_id}")
+async def get_library_entry_alias(entry_id: str):
+    """Alias for /api/library/{entry_id}"""
+    return await get_library_entry(entry_id)
+
+
+@app.get("/api/library")
+async def search_library(q: str = "", limit: int = 10):
+    """
+    Search library entries by title/content.
+    
+    If no query provided, returns recent entries.
+    """
+    import json
+    from pathlib import Path
+    
+    # Determine library path
+    possible_paths = [
+        Path(__file__).parent.parent.parent.parent / "shared" / "8825-library",
+        Path("/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/shared/8825-library"),
+        Path(os.getenv("LIBRARY_PATH", "/tmp/8825-library")),
+    ]
+    
+    library_dir = None
+    for path in possible_paths:
+        if path.exists():
+            library_dir = path
+            break
+    
+    if not library_dir:
+        raise HTTPException(status_code=503, detail="Library service unavailable")
+    
+    results = []
+    query_lower = q.lower()
+    
+    try:
+        for entry_file in sorted(library_dir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+            if len(results) >= limit:
+                break
+            
+            try:
+                with open(entry_file, 'r') as f:
+                    entry = json.load(f)
+                
+                # If no query, return all (up to limit)
+                if not q:
+                    results.append({
+                        "entry_id": entry_file.stem,
+                        "title": entry.get("title", "Untitled"),
+                        "source": entry.get("source", "unknown"),
+                        "timestamp": entry.get("timestamp", ""),
+                    })
+                # Otherwise filter by query
+                elif (query_lower in entry.get("title", "").lower() or 
+                      query_lower in entry.get("content", "").lower()):
+                    results.append({
+                        "entry_id": entry_file.stem,
+                        "title": entry.get("title", "Untitled"),
+                        "source": entry.get("source", "unknown"),
+                        "timestamp": entry.get("timestamp", ""),
+                        "excerpt": entry.get("content", "")[:200] + "..." if len(entry.get("content", "")) > 200 else entry.get("content", "")
+                    })
+            except Exception:
+                continue
+        
+        return {
+            "success": True,
+            "query": q,
+            "count": len(results),
+            "entries": results
+        }
+    except Exception as e:
+        logger.error(f"Library search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

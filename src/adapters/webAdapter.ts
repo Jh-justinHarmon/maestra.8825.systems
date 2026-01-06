@@ -1,16 +1,115 @@
 import { SCHEMA_VERSION } from './types';
 import type { Adapter, Response, ContextResult, CaptureResult, Context } from './types';
 
-// Maestra Backend API endpoint
-// In production: https://maestra-backend-8825-systems.fly.dev
-// In development: http://localhost:8825 (default)
-// Can be overridden at runtime via localStorage (set by Header debug panel)
-// Or via VITE_MAESTRA_API env var at build time
-const getApiBase = () => {
+// ============================================================================
+// Tri-State Connection Hierarchy
+// ============================================================================
+// Priority: Quad-Core (Sidecar) → Local Backend → Hosted Backend
+// This ensures Maestra always has the best available context
+
+export type ConnectionMode = 'quad-core' | 'local' | 'cloud-only';
+
+interface ConnectionState {
+  mode: ConnectionMode;
+  apiBase: string;
+  sidecarAvailable: boolean;
+  localBackendAvailable: boolean;
+  lastHealthCheck: number;
+  handshakeData?: { jwt?: string; libraryId?: string; capabilities?: string[] };
+}
+
+let connectionState: ConnectionState = {
+  mode: 'cloud-only',
+  apiBase: 'https://maestra-backend-8825-systems.fly.dev',
+  sidecarAvailable: false,
+  localBackendAvailable: false,
+  lastHealthCheck: 0,
+};
+
+// Export for UI consumption
+export const getConnectionMode = (): ConnectionMode => connectionState.mode;
+export const getConnectionState = (): ConnectionState => ({ ...connectionState });
+
+/**
+ * Health check with timeout
+ */
+async function healthCheck(url: string, timeoutMs: number = 1000): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    const response = await fetch(`${url}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Determine optimal connection mode by checking services in priority order
+ */
+async function determineConnectionMode(): Promise<void> {
+  const now = Date.now();
+  
+  // Only check every 5 seconds to avoid hammering services
+  if (now - connectionState.lastHealthCheck < 5000) {
+    return;
+  }
+  
+  connectionState.lastHealthCheck = now;
+  
+  // Priority 1: Quad-Core (Sidecar + Handshake)
+  const sidecarHealthy = await healthCheck('http://localhost:8826', 1000);
+  if (sidecarHealthy) {
+    const handshake = await attemptHandshake();
+    if (handshake) {
+      connectionState.mode = 'quad-core';
+      connectionState.apiBase = 'https://maestra-backend-8825-systems.fly.dev';
+      connectionState.sidecarAvailable = true;
+      connectionState.localBackendAvailable = false;
+      connectionState.handshakeData = handshake;
+      console.log('[Maestra] Connected: Quad-Core mode');
+      return;
+    }
+  }
+  
+  connectionState.sidecarAvailable = false;
+  
+  // Priority 2: Local Backend
+  const localHealthy = await healthCheck('http://localhost:8825', 1000);
+  if (localHealthy) {
+    connectionState.mode = 'local';
+    connectionState.apiBase = 'http://localhost:8825';
+    connectionState.localBackendAvailable = true;
+    connectionState.sidecarAvailable = false;
+    console.log('[Maestra] Connected: Local mode');
+    return;
+  }
+  
+  connectionState.localBackendAvailable = false;
+  
+  // Priority 3: Hosted Backend (fallback)
+  connectionState.mode = 'cloud-only';
+  connectionState.apiBase = 'https://maestra-backend-8825-systems.fly.dev';
+  connectionState.sidecarAvailable = false;
+  connectionState.localBackendAvailable = false;
+  console.log('[Maestra] Connected: Cloud-only mode (limited context)');
+}
+
+/**
+ * Get API base URL - respects tri-state hierarchy
+ */
+const getApiBase = async (): Promise<string> => {
   // Check for runtime override first (set by debug panel)
   if (typeof window !== 'undefined') {
     const override = localStorage.getItem('maestra_api_override');
     if (override) {
+      console.log('[Maestra] Using override:', override);
       return override;
     }
   }
@@ -22,17 +121,16 @@ const getApiBase = () => {
     return envApi;
   }
   
-  // Default: localhost for dev, production for deployed
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    console.log('[Maestra] Using localhost backend');
-    return 'http://localhost:8825';
-  }
-  
-  console.log('[Maestra] Using production backend');
-  return 'https://maestra-backend-8825-systems.fly.dev';
+  // Determine optimal connection mode
+  await determineConnectionMode();
+  return connectionState.apiBase;
 };
 
-const API_BASE = getApiBase();
+// Initialize API_BASE asynchronously
+let API_BASE = 'https://maestra-backend-8825-systems.fly.dev';
+getApiBase().then(base => {
+  API_BASE = base;
+});
 
 // Local companion service (runs on user's machine)
 const LOCAL_COMPANION_BASE = 'http://localhost:8826';
@@ -108,6 +206,9 @@ async function registerSessionCapabilities(
 export const webAdapter: Adapter = {
   async sendMessage(conversationId: string, message: string, context?: Context, messages?: any[]): Promise<Response> {
     try {
+      // Determine optimal connection mode before sending
+      await determineConnectionMode();
+      
       // Fire parallel requests: handshake + backend (non-blocking)
       const handshakePromise = attemptHandshake();
 

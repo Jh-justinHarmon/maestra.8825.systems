@@ -1,360 +1,440 @@
-# Backend Sync Protocol - Optimal Execution Plan
-## Risk-Adjusted, Parallelized, MVP-First Approach
+# Maestra Gold Standard - Optimal Execution Plan
 
-**Status:** Execution Roadmap  
-**Version:** 1.0  
-**Last Updated:** 2025-12-31  
-**Optimized Duration:** 8-10 weeks (vs 12-16 weeks original)
+## Overview
 
----
+Transform Maestra into the **premium 8825 experience** with tri-state connection hierarchy, Memory-Native Auth, rich markdown rendering, and deep library integration.
 
-## Optimization Strategy
-
-### Key Insights
-
-1. **Critical Path:** Identity → Handshake → Sync → Everything else
-2. **Parallelization:** Telemetry, Privacy, and Observability can run in parallel
-3. **MVP First:** Get basic sync working in 4 weeks, then harden
-4. **Risk Front-Loading:** Tackle hardest problems (sync, security) early
-5. **Existing Assets:** Leverage existing ConversationHub, LLM env loader, LaunchAgent
+**Total Duration:** 12 working days (aggressive) / 18 days (comfortable)  
+**Dependencies:** Local Sidecar, Local Backend, Hosted Backend, 8825 Library
 
 ---
 
-## Execution Tracks
+## Critical Path
 
 ```
-Week 1-2:  [FOUNDATION]     Identity + Handshake (Critical Path)
-Week 3-4:  [CORE]           State Sync + Basic Telemetry (Critical Path)
-           ─────────────────── MVP CHECKPOINT ───────────────────
-Week 5-6:  [PARALLEL TRACK A] Security Hardening
-           [PARALLEL TRACK B] Privacy & Consent
-Week 7-8:  [PARALLEL TRACK A] Offline & Resilience
-           [PARALLEL TRACK B] Observability
-Week 9-10: [INTEGRATION]    Multi-Platform + Polish
+Day 1-2: Connection Hierarchy (unlocks everything else)
+    ↓
+Day 3-4: Library Integration (the core value proposition)
+    ↓
+Day 5-6: Markdown Rendering (visible quality improvement)
+    ↓
+Day 7-8: Memory-Native Auth (security + personalization foundation)
+    ↓
+Day 9-10: Error UX + Basic Tests (production readiness)
+    ↓
+Day 11-12: Deploy + Validate (ship it)
 ```
 
 ---
 
-## Week 1-2: Foundation (Critical Path)
+## Day 1-2: Tri-State Connection Hierarchy
 
-### Goal: Establish cryptographic identity and bidirectional handshake
+**Goal:** Eliminate silent failures. Always know what mode you're in.
 
-### Week 1: Identity System
+### Day 1: Frontend Connection Logic
 
-| Day | Deliverable | Owner | Risk |
-|-----|-------------|-------|------|
-| 1 | `BackendIdentity` class with `backend_id` generation | Backend | Low |
-| 2 | `KeychainManager` for macOS keychain integration | Backend | Medium |
-| 3 | `/identity` endpoint on local backend (port 8825) | Backend | Low |
-| 4 | `/identity` endpoint on hosted backend (Fly.io) | Backend | Low |
-| 5 | Integration test: both backends return valid identity | QA | Low |
+**File:** `apps/maestra.8825.systems/src/adapters/webAdapter.ts`
 
-**Deliverables:**
-- `backend_8825/identity.py`
-- `backend_8825/keychain.py`
-- `/identity` endpoint live on both backends
+**Tasks:**
+1. Refactor `getApiBase()` to implement priority cascade:
+   ```
+   1. Try Sidecar handshake (localhost:8826) → Quad-Core
+   2. Try Local Backend ping (localhost:8825) → Local Mode  
+   3. Fall back to Hosted (fly.dev) → Cloud Only
+   ```
+2. Add connection state type:
+   ```typescript
+   type ConnectionMode = 'quad-core' | 'local' | 'cloud-only';
+   ```
+3. Expose `getConnectionMode()` for UI consumption
+4. Add auto-reconnect logic with exponential backoff
 
-### Week 2: Handshake & Session Binding
+**Deliverable:** `webAdapter.ts` with tri-state logic
 
-| Day | Deliverable | Owner | Risk |
-|-----|-------------|-------|------|
-| 1 | `SessionBindingToken` class with HMAC signing | Backend | Medium |
-| 2 | `/register-peer` endpoint on local backend | Backend | Medium |
-| 3 | `/register-peer` endpoint on hosted backend | Backend | Medium |
-| 4 | UI handshake flow: detect both, create SBT, register | Frontend | High |
-| 5 | End-to-end test: UI → Local → Hosted registration | QA | Medium |
+### Day 2: Status Indicator UI
 
-**Deliverables:**
-- `backend_8825/sbt.py`
-- `/register-peer` endpoint live on both backends
-- UI `handshake()` function updated in `webAdapter.ts`
+**Files:** 
+- `src/components/ConnectionStatus.tsx` (new)
+- `src/components/Header.tsx` (update)
 
-**Success Gate:** UI successfully registers local backend with hosted backend, SBT verified on both ends.
+**Tasks:**
+1. Create `ConnectionStatus` component:
+   - 🟢 Quad-Core Active
+   - 🟡 Local Mode
+   - ⚪ Cloud Only
+2. Add hover tooltip showing:
+   - Active capabilities
+   - Connected services
+   - Last handshake time
+3. Wire into Header component
+4. Add connection change notifications (toast)
 
----
+**Deliverable:** Visible, always-accurate connection status
 
-## Week 3-4: Core Sync (Critical Path)
+**Acceptance Test:**
+```bash
+# Kill sidecar
+pkill -f "sidecar"
+# UI should show 🟡 Local Mode within 2s
 
-### Goal: Bidirectional conversation sync with basic telemetry
-
-### Week 3: State Synchronization
-
-| Day | Deliverable | Owner | Risk |
-|-----|-------------|-------|------|
-| 1 | `SyncPayload` and `ConversationSync` models | Backend | Low |
-| 2 | `/sync/{peer_id}` endpoint on hosted backend | Backend | High |
-| 3 | `/sync/{peer_id}` endpoint on local backend | Backend | High |
-| 4 | `SyncScheduler` with 5-second interval | Backend | Medium |
-| 5 | Integration test: conversation syncs local → hosted | QA | High |
-
-**Key Decision:** Use Last-Write-Wins (not CRDT) for v1. Simpler, lower risk.
-
-### Week 4: Basic Telemetry
-
-| Day | Deliverable | Owner | Risk |
-|-----|-------------|-------|------|
-| 1 | `TelemetryEvent` model | Backend | Low |
-| 2 | WebSocket `/telemetry/{peer_id}` on hosted backend | Backend | Medium |
-| 3 | `TelemetryClient` on local backend | Backend | Medium |
-| 4 | Instrument `/api/maestra/advisor/ask` with telemetry | Backend | Low |
-| 5 | Verify events stream from local to hosted | QA | Medium |
-
-**Deliverables:**
-- Conversations sync bidirectionally every 5 seconds
-- Telemetry events stream in real-time
-- Messages marked with `source_backend` field
-
----
-
-## ─────────────── MVP CHECKPOINT (End of Week 4) ───────────────
-
-### What Works:
-- ✅ Both backends have cryptographic identity
-- ✅ UI creates Session Binding Token linking them
-- ✅ Conversations sync local ↔ hosted every 5 seconds
-- ✅ Telemetry streams from local to hosted
-- ✅ User can start on local, continue on hosted (or vice versa)
-
-### What Doesn't Work Yet:
-- ❌ Offline mode (queues, retry)
-- ❌ Key rotation, revocation
-- ❌ PII redaction, privacy controls
-- ❌ Mobile companions
-- ❌ Observability dashboard
-
-### Decision Point:
-- **If MVP works:** Continue to hardening phases
-- **If MVP fails:** Debug sync/handshake before proceeding
-
----
-
-## Week 5-6: Parallel Hardening
-
-### Track A: Security Hardening (Week 5-6)
-
-| Week | Day | Deliverable | Risk |
-|------|-----|-------------|------|
-| 5 | 1-2 | `KeyRotationManager` with 7-day grace period | Medium |
-| 5 | 3-4 | `DELETE /peers/{peer_id}` revocation endpoint | Medium |
-| 5 | 5 | Rate limiting on `/sync` and `/telemetry` | Low |
-| 6 | 1-2 | `AuditLogger` for security events | Low |
-| 6 | 3-5 | Security tests: rotation, revocation, rate limits | Medium |
-
-### Track B: Privacy & Consent (Week 5-6)
-
-| Week | Day | Deliverable | Risk |
-|------|-----|-------------|------|
-| 5 | 1-2 | `PrivacySettings` model and storage | Low |
-| 5 | 3-4 | `PUT /privacy-settings` endpoint | Low |
-| 5 | 5 | UI toggle for "Pause Sync" | Low |
-| 6 | 1-2 | `PIIRedactor` for email, phone, SSN, credit card | Medium |
-| 6 | 3-4 | `RetentionPolicy` with 90-day default | Low |
-| 6 | 5 | Privacy tests: redaction, retention, consent | Low |
-
-**Parallelization:** These tracks have no dependencies on each other. Run simultaneously with 2 engineers or time-slice with 1.
-
----
-
-## Week 7-8: Parallel Resilience
-
-### Track A: Offline & Resilience (Week 7-8)
-
-| Week | Day | Deliverable | Risk |
-|------|-----|-------------|------|
-| 7 | 1-2 | `OfflineQueue` with SQLite persistence | Medium |
-| 7 | 3-4 | `RetryStrategy` with exponential backoff | Low |
-| 7 | 5 | `NetworkMonitor` for online/offline detection | Low |
-| 8 | 1-2 | Integrate offline queue into `SyncScheduler` | Medium |
-| 8 | 3-4 | Integrate offline queue into `TelemetryClient` | Medium |
-| 8 | 5 | Offline tests: queue, retry, recovery | High |
-
-### Track B: Observability (Week 7-8)
-
-| Week | Day | Deliverable | Risk |
-|------|-----|-------------|------|
-| 7 | 1-2 | `GET /sync/metrics/{peer_id}` endpoint | Low |
-| 7 | 3-4 | `GET /dashboard/telemetry` aggregate endpoint | Low |
-| 7 | 5 | `GET /debug/sync/{peer_id}` debug endpoint | Low |
-| 8 | 1-2 | `AlertingSystem` for lag, queue depth, errors | Medium |
-| 8 | 3-5 | Observability tests and documentation | Low |
-
----
-
-## Week 9-10: Integration & Polish
-
-### Week 9: Multi-Platform Parity
-
-| Day | Deliverable | Risk |
-|-----|-------------|------|
-| 1-2 | iOS `BackendSyncClient` Swift SDK | Medium |
-| 3-4 | Android `BackendSyncClient` Kotlin SDK | Medium |
-| 5 | Cross-platform sync tests (iOS ↔ Web ↔ Android) | High |
-
-### Week 10: Polish & Documentation
-
-| Day | Deliverable | Risk |
-|-----|-------------|------|
-| 1-2 | End-to-end integration tests | Medium |
-| 3 | Performance benchmarks (sync latency, queue depth) | Low |
-| 4 | Documentation update (all protocols, APIs) | Low |
-| 5 | Release prep, deployment to production | Medium |
-
----
-
-## Resource Allocation
-
-### Minimum Viable Team: 1 Engineer
-
-```
-Week 1-4:  Foundation + Core (sequential, 1 engineer)
-Week 5-6:  Security → Privacy (sequential, 1 engineer)
-Week 7-8:  Offline → Observability (sequential, 1 engineer)
-Week 9-10: Multi-Platform + Polish (1 engineer)
+# Kill local backend
+pkill -f "8825.*backend"
+# UI should show ⚪ Cloud Only within 2s
 ```
 
-**Duration:** 10 weeks
+---
 
-### Optimal Team: 2 Engineers
+## Day 3-4: Library Integration
 
+**Goal:** Real retrieval from 8825 Library. The core value.
+
+### Day 3: Backend Library Endpoints
+
+**File:** `apps/maestra.8825.systems/backend/server.py`
+
+**Tasks:**
+1. Finalize `/api/library/{entry_id}` endpoint (already started)
+2. Add `/api/library/search` for K/D/P queries
+3. Implement path resolution:
+   ```python
+   # Priority order:
+   # 1. Environment variable LIBRARY_PATH
+   # 2. Relative path from backend
+   # 3. Hardcoded fallback (dev only)
+   ```
+4. Add entry validation and error handling
+
+**File:** `apps/maestra.8825.systems/backend/advisor.py`
+
+**Tasks:**
+1. Detect Entry ID patterns in user messages (16-char hex)
+2. Fetch entry content before LLM call
+3. Inject entry content into prompt with clear markers
+4. Add entry to sources list in response
+
+**Deliverable:** Backend can fetch and use library entries
+
+### Day 4: Frontend Library Integration
+
+**File:** `src/adapters/webAdapter.ts`
+
+**Tasks:**
+1. Add `fetchLibraryEntry(entryId: string)` method
+2. Route to appropriate backend based on connection mode:
+   - Quad-Core: via Sidecar capability
+   - Local: via localhost:8825
+   - Cloud: return "unavailable" error
+3. Add library entry to context before sending message
+
+**File:** `src/components/SourceCard.tsx` (new)
+
+**Tasks:**
+1. Create source citation card component:
+   ```
+   📚 Referenced: "Entry Title"
+   Mode: Quad-Core • Confidence: 0.9
+   Entry ID: 5ce9e4d4f0f23d90
+   ```
+2. Render in message stream when entries are used
+
+**Deliverable:** End-to-end library retrieval working
+
+**Acceptance Test:**
 ```
-Week 1-4:  Engineer A: Backend (Identity, Handshake, Sync)
-           Engineer B: Frontend (UI handshake, testing)
-Week 5-6:  Engineer A: Security Hardening
-           Engineer B: Privacy & Consent
-Week 7-8:  Engineer A: Offline & Resilience
-           Engineer B: Observability
-Week 9-10: Both: Multi-Platform + Polish
+User: "Use Entry ID: 5ce9e4d4f0f23d90"
+Expected: Answer references entry content + source card appears
 ```
 
-**Duration:** 8 weeks
+---
+
+## Day 5-6: Markdown Rendering
+
+**Goal:** Fix raw `**text**` rendering. Look premium.
+
+### Day 5: Markdown Parser Integration
+
+**File:** `src/components/MessageRenderer.tsx` (new or refactor)
+
+**Tasks:**
+1. Install `react-markdown` + `remark-gfm` + `rehype-highlight`
+2. Create streaming-aware markdown renderer:
+   - Handle incomplete syntax gracefully
+   - Apply 8825 design tokens
+3. Support:
+   - Headings (H1-H6)
+   - Bold/italic/strikethrough
+   - Code blocks with syntax highlighting
+   - Lists (ordered/unordered)
+   - Links
+   - Tables
+
+**Deliverable:** Markdown renders correctly in all messages
+
+### Day 6: Message Layout Polish
+
+**Files:**
+- `src/components/Message.tsx`
+- `src/styles/messages.css` (or Tailwind classes)
+
+**Tasks:**
+1. Clear visual separation: user vs assistant messages
+2. Proper typography:
+   - Max line width (~70 chars)
+   - Comfortable line height
+   - Readable font sizes
+3. Source panel integration:
+   - Collapsible "Sources" section per message
+   - Shows all library entries + context used
+4. Responsive design for mobile
+
+**Deliverable:** Visually polished message experience
+
+**Acceptance Test:**
+```
+Paste markdown with headings, bullets, code blocks
+→ Renders correctly with proper styling
+→ No raw ** or ``` visible
+```
+
+---
+
+## Day 7-8: Memory-Native Auth
+
+**Goal:** Enforce authenticated context. Prevent "dumb Maestra" for registered users.
+
+### Day 7: Auth Flow Implementation
+
+**File:** `apps/maestra.8825.systems/backend/auth.py` (new or update)
+
+**Tasks:**
+1. Implement Memory-Native Auth validation:
+   - Check for auth anchor K-entry via Sidecar
+   - Validate anchor signature/freshness
+2. Create `/api/auth/handshake` endpoint:
+   - Input: device fingerprint, requested capabilities
+   - Output: session token, granted capabilities, user profile
+3. Add mode enforcement:
+   - Registered users (Justin, Becky) → refuse Cloud Only
+   - Guest users → allow Cloud Only with warning
+
+**File:** `src/adapters/webAdapter.ts`
+
+**Tasks:**
+1. Call auth handshake on startup
+2. Store session token for subsequent requests
+3. Handle auth failures with clear messaging
+
+**Deliverable:** Memory-Native Auth working end-to-end
+
+### Day 8: Personalization Foundation
+
+**File:** `apps/maestra.8825.systems/backend/advisor.py`
+
+**Tasks:**
+1. Fetch user learning profile K-entry on auth
+2. Cache profile in session state
+3. Inject style preferences into system prompt:
+   ```
+   User preferences:
+   - Style: bullet points with examples
+   - Pace: detailed explanations
+   - Tone: technical but approachable
+   ```
+
+**Deliverable:** Answers adapt to user preferences
+
+**Acceptance Test:**
+```
+With "bullets + examples" profile:
+→ Answers come as short bullets with concrete examples
+→ Not walls of prose
+```
+
+---
+
+## Day 9-10: Error UX + Basic Tests
+
+**Goal:** Graceful degradation. Never leave user confused.
+
+### Day 9: Error Handling
+
+**File:** `src/components/ErrorBanner.tsx` (new)
+
+**Tasks:**
+1. Create error banner component with:
+   - Clear error message
+   - Suggested action
+   - Retry button (where applicable)
+2. Error categories:
+   - Connection errors → "Trying Local Backend..."
+   - Library errors → "Entry not found. Check ID."
+   - Auth errors → "Please re-authenticate."
+3. Toast notifications for transient errors
+
+**File:** `src/adapters/webAdapter.ts`
+
+**Tasks:**
+1. Add retry logic with exponential backoff
+2. Proper error classification and propagation
+3. Fallback paths for each error type
+
+**Deliverable:** All errors have clear user messaging
+
+### Day 10: Critical Path Tests
+
+**File:** `apps/maestra.8825.systems/tests/` (new directory)
+
+**Tasks:**
+1. Connection hierarchy test:
+   ```typescript
+   test('falls back to Local when Sidecar offline')
+   test('falls back to Cloud when Local offline')
+   test('reconnects when services restored')
+   ```
+2. Library retrieval test:
+   ```typescript
+   test('fetches entry by ID and includes in response')
+   test('shows error for invalid entry ID')
+   ```
+3. Auth flow test:
+   ```typescript
+   test('completes handshake in <1.5s')
+   test('refuses Cloud Only for registered users')
+   ```
+
+**File:** `.github/workflows/ci.yml` (update)
+
+**Tasks:**
+1. Add test job to CI pipeline
+2. Fail build if critical tests fail
+
+**Deliverable:** CI gates prevent regressions
+
+---
+
+## Day 11-12: Deploy + Validate
+
+**Goal:** Ship it. Verify in production.
+
+### Day 11: Deployment
+
+**Tasks:**
+1. Push all changes to GitHub
+2. Verify CI passes
+3. Deploy backend to Fly.io:
+   ```bash
+   cd apps/maestra.8825.systems/backend
+   fly deploy
+   ```
+4. Deploy frontend (if separate):
+   ```bash
+   cd apps/maestra.8825.systems
+   npm run build && fly deploy
+   ```
+5. Verify DNS routing still works
+
+### Day 12: Production Validation
+
+**Tasks:**
+1. **Connection Test:**
+   - Open maestra.8825.systems
+   - Verify Quad-Core status (with local services running)
+   - Kill sidecar → verify Local Mode
+   - Kill local backend → verify Cloud Only warning
+2. **Library Test:**
+   - Ask about Entry ID 5ce9e4d4f0f23d90
+   - Verify answer uses entry content
+   - Verify source card appears
+3. **Rendering Test:**
+   - Ask complex question
+   - Verify markdown renders correctly
+4. **Auth Test:**
+   - Verify Memory-Native Auth completes
+   - Verify personalization applied
+
+**Deliverable:** Production Maestra working as designed
+
+---
+
+## Post-Launch (Days 13+)
+
+### Week 3: Security Hardening
+- mTLS for Sidecar ↔ Backend
+- JWT scoping for capabilities
+- Boundary enforcement
+
+### Week 4: Advanced Features
+- Conversation threading
+- Auto-summarization
+- Universal capture schema
+
+### Week 5: Observability
+- Telemetry integration
+- Synthetic probes
+- Performance dashboards
+
+### Week 6: Polish
+- Accessibility audit
+- Mobile optimization
+- Documentation
 
 ---
 
 ## Risk Mitigation
 
-### High-Risk Items (Front-Load)
-
-1. **State Sync (Week 3):** Most complex, highest risk of bugs
-   - Mitigation: Start with Last-Write-Wins, upgrade to CRDT later
-   - Fallback: If sync fails, local-only mode still works
-
-2. **UI Handshake (Week 2):** Orchestrates both backends
-   - Mitigation: Graceful degradation to hosted-only if local unavailable
-   - Fallback: Manual `.env` override for testing
-
-3. **Offline Recovery (Week 8):** Edge cases with queue replay
-   - Mitigation: Extensive testing with network simulation
-   - Fallback: Manual "force sync" button in UI
-
-### Medium-Risk Items (Monitor)
-
-4. **Key Rotation:** Breaking active sessions
-5. **WebSocket Telemetry:** Connection stability
-6. **Mobile SDKs:** Platform-specific quirks
-
-### Low-Risk Items (Defer if Needed)
-
-7. **PII Redaction:** Regex-based, well-understood
-8. **Observability Endpoints:** Read-only, low complexity
-9. **Documentation:** Can be done incrementally
+| Risk | Mitigation |
+|------|------------|
+| Sidecar not running | Local Mode fallback works |
+| Library path issues | Multiple fallback paths + clear errors |
+| Auth anchor missing | Guest mode with warning |
+| Fly.io deployment fails | Local testing validates before deploy |
+| Markdown parser issues | Fallback to plain text |
 
 ---
 
-## Success Metrics by Milestone
+## Success Metrics
 
-### MVP (Week 4)
-- [ ] Handshake success rate: >95%
-- [ ] Sync latency: <5 seconds
-- [ ] Telemetry delivery: >99%
+**Day 12 (MVP):**
+- [ ] Tri-state connection working with visible status
+- [ ] Entry ID retrieval working end-to-end
+- [ ] Markdown rendering correctly
+- [ ] Memory-Native Auth completing
+- [ ] No silent failures (all errors have messaging)
 
-### Hardened (Week 8)
-- [ ] Sync reliability: >99%
-- [ ] Offline queue: <100MB, <1000 items
-- [ ] Security: 0 unauthorized registrations
-- [ ] Privacy: 100% PII redaction
-
-### Production (Week 10)
-- [ ] Cross-platform: iOS/Android/Web all working
-- [ ] MTTR for sync issues: <5 minutes
-- [ ] Documentation: Complete API reference
+**Week 6 (Gold Standard):**
+- [ ] 95%+ Quad-Core success rate for registered users
+- [ ] <2s response time for Entry ID retrieval
+- [ ] Zero accessibility violations
+- [ ] Comprehensive test coverage
+- [ ] Production observability in place
 
 ---
 
-## Quick Start: Week 1, Day 1
+## Quick Start
 
 ```bash
-# 1. Create identity module
-touch backend_8825/identity.py
+# Day 1 - Start with connection hierarchy
+cd apps/maestra.8825.systems
+code src/adapters/webAdapter.ts
 
-# 2. Implement BackendIdentity class
-# - Generate backend_id from machine_id
-# - Generate RSA-2048 keypair
-# - Store private key in keychain
+# Run local services for testing
+# Terminal 1: Local Backend
+cd backend && python server.py
 
-# 3. Add /identity endpoint to server.py
-@app.get("/identity")
-async def get_identity():
-    return {
-        "backend_id": identity.backend_id,
-        "backend_type": "local",
-        "public_key": identity.public_key,
-        "capabilities": ["offline", "fast_context", "local_capture"],
-        "version": "1.0"
-    }
+# Terminal 2: Local Sidecar (if available)
+cd 8825_core/tools/capability_sidecar && python server.py
 
-# 4. Test
-curl http://localhost:8825/identity | jq .
+# Terminal 3: Frontend dev
+npm run dev
 ```
 
----
+**First commit message:**
+```
+feat(maestra): implement tri-state connection hierarchy
 
-## Decision Log
+- Add Quad-Core → Local → Hosted fallback logic
+- Add ConnectionStatus component with mode indicators
+- Add auto-reconnect with exponential backoff
 
-| Decision | Rationale | Reversible? |
-|----------|-----------|-------------|
-| Last-Write-Wins over CRDT | Simpler, lower risk for v1 | Yes |
-| 5-second sync interval | Balance between freshness and load | Yes |
-| 8-hour SBT expiration | Security vs UX tradeoff | Yes |
-| OS Keychain for keys | Security best practice | No |
-| SQLite for offline queue | Simple, reliable, portable | Yes |
-| WebSocket for telemetry | Real-time, bidirectional | Yes |
-
----
-
-## Files to Create (Ordered)
-
-### Week 1-2
-1. `backend_8825/identity.py`
-2. `backend_8825/keychain.py`
-3. `backend_8825/sbt.py`
-4. `src/adapters/webAdapter.ts` (update handshake)
-
-### Week 3-4
-5. `backend_8825/sync_models.py`
-6. `backend_8825/sync_scheduler.py`
-7. `backend_8825/telemetry_models.py`
-8. `backend_8825/telemetry_client.py`
-
-### Week 5-6
-9. `backend_8825/key_rotation.py`
-10. `backend_8825/rate_limiter.py`
-11. `backend_8825/audit_log.py`
-12. `backend_8825/privacy_settings.py`
-13. `backend_8825/pii_redactor.py`
-14. `backend_8825/retention_policy.py`
-
-### Week 7-8
-15. `backend_8825/offline_queue.py`
-16. `backend_8825/retry.py`
-17. `backend_8825/network_monitor.py`
-18. `backend_8825/alerting.py`
-
-### Week 9-10
-19. `mobile_sdk/BackendSyncClient.swift`
-20. `mobile_sdk/BackendSyncClient.kt`
-
----
-
-## Next Action
-
-**Start Week 1, Day 1:** Create `backend_8825/identity.py` with `BackendIdentity` class.
+Part of Maestra Gold Standard initiative
+```
