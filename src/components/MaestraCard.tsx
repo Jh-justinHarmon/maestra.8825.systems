@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Paperclip, Camera, Settings, X, ArrowDown, Target } from 'lucide-react';
+import { MessageRenderer } from './MessageRenderer';
+import { SourcesPanel } from './SourcesPanel';
 
 // Type declaration for ImageCapture API (not in default TS lib)
 declare class ImageCapture {
@@ -230,16 +232,23 @@ ${pageContext.visibleText.slice(0, 2000)}...
             className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 ${
+              className={`max-w-[85%] rounded-lg px-4 py-3 ${
                 message.role === 'user'
                   ? 'bg-brand text-white'
                   : 'bg-zinc-700 text-zinc-100'
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
-              <span className="text-xs opacity-60 mt-1 block">
+              {message.role === 'user' ? (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              ) : (
+                <MessageRenderer content={message.content} />
+              )}
+              <span className="text-xs opacity-60 mt-2 block">
                 {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
+              {message.role === 'assistant' && (message as any).sources && (
+                <SourcesPanel sources={(message as any).sources} className="mt-2" />
+              )}
             </div>
           </div>
         ))}
