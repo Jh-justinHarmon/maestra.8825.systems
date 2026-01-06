@@ -155,16 +155,19 @@ async function attemptHandshake(): Promise<{ jwt?: string; libraryId?: string; c
         version: '1',
         user_agent: 'maestra-ui/1.0'
       }),
-      signal: controller.signal
+      signal: controller.signal,
+      mode: 'cors',
     });
     
     clearTimeout(timeoutId);
     
     if (!response.ok) {
+      console.warn(`[Maestra] Handshake failed: ${response.status} ${response.statusText}`);
       return null;
     }
     
     const data = await response.json();
+    console.log('[Maestra] Handshake successful:', data.session_id);
     return {
       jwt: data.jwt,
       libraryId: data.library_id,
@@ -172,6 +175,7 @@ async function attemptHandshake(): Promise<{ jwt?: string; libraryId?: string; c
     };
   } catch (error) {
     // Timeout or connection error - local companion unavailable
+    console.warn('[Maestra] Handshake error:', error instanceof Error ? error.message : String(error));
     return null;
   }
 }

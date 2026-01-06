@@ -11,6 +11,7 @@ This enables Quad-Core mode: Maestra UI + Local Sidecar + Local Backend + Local 
 """
 
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from datetime import datetime, timedelta
 import json
 import os
@@ -18,6 +19,7 @@ from pathlib import Path
 import logging
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
