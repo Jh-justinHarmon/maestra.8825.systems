@@ -1746,23 +1746,35 @@ try:
 except ImportError:
     # Try with path adjustment for production
     try:
-        # In production, 8825_core might be at different location
-        import glob
-        
         # Search for 8825_core in common locations
+        # In Docker, we need to search from /app upward
         search_paths = [
+            # Local development
             Path(__file__).parent.parent.parent / "users" / "justin_harmon" / "8825-Jh" / "8825_core",
             Path(__file__).parent.parent.parent / "8825_core",
-            Path("/app/8825_core"),
+            # Production (Fly.io mounts workspace)
+            Path("/workspace/users/justin_harmon/8825-Jh/8825_core"),
             Path("/workspace/8825_core"),
+            # Fallback
+            Path("/app/8825_core"),
         ]
         
         core_path = None
         for path in search_paths:
-            if path.exists():
+            if path.exists() and (path / "agents" / "prompt_gen").exists():
                 core_path = path
                 logger.info(f"Found 8825_core at: {core_path}")
                 break
+        
+        if not core_path:
+            # Last resort: search parent directories
+            current = Path(__file__).parent
+            for _ in range(10):  # Search up to 10 levels
+                if (current / "8825_core" / "agents" / "prompt_gen").exists():
+                    core_path = current / "8825_core"
+                    logger.info(f"Found 8825_core via parent search at: {core_path}")
+                    break
+                current = current.parent
         
         if core_path:
             sys.path.insert(0, str(core_path))
@@ -1770,10 +1782,10 @@ except ImportError:
             HAS_PROMPTGEN = True
             logger.info("✓ PromptGen imported with path adjustment")
         else:
-            logger.warning("8825_core not found in any expected location")
+            logger.warning("8825_core not found - PromptGen will be unavailable")
             
     except ImportError as e:
-        logger.warning(f"PromptGen unavailable: {e}")
+        logger.warning(f"PromptGen import failed: {e}")
 
 _precompute_agent = None
 
