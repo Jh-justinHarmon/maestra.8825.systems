@@ -7,14 +7,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
+# Copy 8825_core (when building from repo root)
+COPY users/justin_harmon/8825-Jh/8825_core /app/8825_core
 
-# Install Python dependencies
+# Copy backend requirements and install
+COPY apps/maestra.8825.systems/backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy backend application code
+COPY apps/maestra.8825.systems/backend/ .
+
+# Add 8825_core to PYTHONPATH
+ENV PYTHONPATH="/app/8825_core:${PYTHONPATH}"
 
 # Expose port
 EXPOSE 8000
