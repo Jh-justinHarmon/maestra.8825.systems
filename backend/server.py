@@ -1735,14 +1735,45 @@ async def search_library(q: str = "", limit: int = 10):
 # ============================================================================
 
 # Import PromptGen agent for precompute
+HAS_PROMPTGEN = False
+PromptGenAgent = None
+
 try:
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "users" / "justin_harmon" / "8825-Jh" / "8825_core"))
+    # Try direct import first
     from agents.prompt_gen import PromptGenAgent, PromptGenResult
     HAS_PROMPTGEN = True
-except ImportError as e:
-    logger.warning(f"PromptGen unavailable: {e}")
-    HAS_PROMPTGEN = False
-    PromptGenAgent = None
+    logger.info("✓ PromptGen imported directly")
+except ImportError:
+    # Try with path adjustment for production
+    try:
+        # In production, 8825_core might be at different location
+        import glob
+        
+        # Search for 8825_core in common locations
+        search_paths = [
+            Path(__file__).parent.parent.parent / "users" / "justin_harmon" / "8825-Jh" / "8825_core",
+            Path(__file__).parent.parent.parent / "8825_core",
+            Path("/app/8825_core"),
+            Path("/workspace/8825_core"),
+        ]
+        
+        core_path = None
+        for path in search_paths:
+            if path.exists():
+                core_path = path
+                logger.info(f"Found 8825_core at: {core_path}")
+                break
+        
+        if core_path:
+            sys.path.insert(0, str(core_path))
+            from agents.prompt_gen import PromptGenAgent, PromptGenResult
+            HAS_PROMPTGEN = True
+            logger.info("✓ PromptGen imported with path adjustment")
+        else:
+            logger.warning("8825_core not found in any expected location")
+            
+    except ImportError as e:
+        logger.warning(f"PromptGen unavailable: {e}")
 
 _precompute_agent = None
 
