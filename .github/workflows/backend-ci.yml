@@ -1,0 +1,121 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/maestra.8825.systems/backend/**'
+      - 'users/justin_harmon/8825-Jh/8825_core/**'
+  pull_request:
+    paths:
+      - 'apps/maestra.8825.systems/backend/**'
+      - 'users/justin_harmon/8825-Jh/8825_core/**'
+
+jobs:
+  container-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Build backend container
+        run: |
+          echo "Building backend container from repo root..."
+          docker build \
+            -f apps/maestra.8825.systems/backend/Dockerfile \
+            -t backend-test:${{ github.sha }} \
+            .
+      
+      - name: Test 8825_core presence
+        run: |
+          echo "Checking for 8825_core directory..."
+          docker run --rm backend-test:${{ github.sha }} \
+            ls -la /app/8825_core/agents/prompt_gen || exit 1
+          echo "✓ 8825_core present"
+      
+      - name: Test PromptGen import
+        run: |
+          echo "Testing PromptGen import..."
+          docker run --rm backend-test:${{ github.sha }} \
+            python -c "from agents.prompt_gen import PromptGenAgent; print('✓ PromptGen imported successfully')" || exit 1
+      
+      - name: Test PYTHONPATH
+        run: |
+          echo "Checking PYTHONPATH..."
+          docker run --rm backend-test:${{ github.sha }} \
+            python -c "import sys; assert '/app/8825_core' in sys.path, 'PYTHONPATH not set'; print('✓ PYTHONPATH correct')" || exit 1
+      
+      - name: Test health endpoint
+        run: |
+          echo "Starting container..."
+          docker run -d --name backend-test -p 8000:8000 backend-test:${{ github.sha }}
+          
+          echo "Waiting for startup..."
+          sleep 10
+          
+          echo "Testing health endpoint..."
+          curl -f http://localhost:8000/health || exit 1
+          echo "✓ Health endpoint working"
+          
+          docker stop backend-test
+          docker rm backend-test
+      
+      - name: Test deep health endpoint
+        run: |
+          echo "Starting container..."
+          docker run -d --name backend-test -p 8000:8000 backend-test:${{ github.sha }}
+          sleep 10
+          
+          echo "Testing deep health endpoint..."
+          response=$(curl -s http://localhost:8000/health/deep)
+          echo "Response: $response"
+          
+          # Check response has required fields
+          echo "$response" | jq -e '.checks.promptgen_import' || exit 1
+          echo "$response" | jq -e '.checks.promptgen_functional' || exit 1
+          
+          # Check critical checks are passing
+          promptgen_import=$(echo "$response" | jq -r '.checks.promptgen_import')
+          promptgen_functional=$(echo "$response" | jq -r '.checks.promptgen_functional')
+          
+          if [ "$promptgen_import" != "true" ] || [ "$promptgen_functional" != "true" ]; then
+            echo "✗ Critical health checks failed"
+            echo "$response" | jq .
+            exit 1
+          fi
+          
+          echo "✓ Deep health check passed"
+          docker stop backend-test
+          docker rm backend-test
+      
+      - name: Test precompute endpoint
+        run: |
+          echo "Starting container..."
+          docker run -d --name backend-test -p 8000:8000 backend-test:${{ github.sha }}
+          sleep 10
+          
+          echo "Testing precompute endpoint..."
+          response=$(curl -s -X POST http://localhost:8000/api/precompute \
+            -H "Content-Type: application/json" \
+            -d '{"text":"test query"}')
+          
+          echo "Response: $response"
+          
+          # Check response has required fields
+          echo "$response" | jq -e '.confidence' || exit 1
+          echo "$response" | jq -e '.intent' || exit 1
+          echo "$response" | jq -e '.optimized_prompt' || exit 1
+          
+          # Check confidence is non-zero
+          confidence=$(echo "$response" | jq -r '.confidence')
+          if (( $(echo "$confidence <= 0" | bc -l) )); then
+            echo "✗ Confidence is zero or negative"
+            exit 1
+          fi
+          
+          echo "✓ Precompute endpoint working"
+          docker stop backend-test
+          docker rm backend-test
