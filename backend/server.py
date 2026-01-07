@@ -1731,14 +1731,124 @@ async def search_library(q: str = "", limit: int = 10):
 
 
 # ============================================================================
-# DLI Pre-Computation Router
+# DLI Pre-Computation Endpoint
 # ============================================================================
+
+# Import PromptGen agent for precompute
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "users" / "justin_harmon" / "8825-Jh" / "8825_core"))
+    from agents.prompt_gen import PromptGenAgent, PromptGenResult
+    HAS_PROMPTGEN = True
+except ImportError as e:
+    logger.warning(f"PromptGen unavailable: {e}")
+    HAS_PROMPTGEN = False
+    PromptGenAgent = None
+
+_precompute_agent = None
+
+def get_precompute_agent():
+    """Get or initialize PromptGen agent for precompute."""
+    global _precompute_agent
+    if _precompute_agent is None and HAS_PROMPTGEN:
+        _precompute_agent = PromptGenAgent()
+    return _precompute_agent
+
+class PrecomputeRequest(BaseModel):
+    """Request to precompute a prompt."""
+    text: str
+    session_id: Optional[str] = None
+
+class PrecomputeResponse(BaseModel):
+    """Response with precomputed prompt and metadata."""
+    optimized_prompt: str
+    context_refs: list = []
+    recommended_model: str = "gpt-4"
+    cost_estimate: str = "$0.00"
+    confidence: float = 0.7
+    intent: Optional[str] = None
+    grounded: bool = False
+
+@app.post("/api/precompute")
+async def precompute_endpoint(request: PrecomputeRequest) -> PrecomputeResponse:
+    """
+    Precompute optimized prompt from raw text.
+    
+    Called by frontend during typing (500ms debounce).
+    Returns optimized prompt + context + model recommendation.
+    """
+    try:
+        if not request.text or len(request.text) < 3:
+            return PrecomputeResponse(
+                optimized_prompt=request.text,
+                context_refs=[],
+                recommended_model="gpt-4",
+                cost_estimate="$0.00",
+                confidence=0.0,
+                grounded=False
+            )
+        
+        logger.info(f"Precompute request: {len(request.text)} chars")
+        
+        if not HAS_PROMPTGEN:
+            logger.warning("PromptGen not available, returning raw text")
+            return PrecomputeResponse(
+                optimized_prompt=request.text,
+                context_refs=[],
+                recommended_model="gpt-4",
+                cost_estimate="$0.00",
+                confidence=0.0,
+                grounded=False
+            )
+        
+        # Get agent and run precompute
+        agent = get_precompute_agent()
+        if agent is None:
+            return PrecomputeResponse(
+                optimized_prompt=request.text,
+                context_refs=[],
+                recommended_model="gpt-4",
+                cost_estimate="$0.00",
+                confidence=0.0,
+                grounded=False
+            )
+        
+        result = await agent.refine_with_context(
+            raw_text=request.text,
+            gather_context=True,
+            enforce_grounding=False  # Allow optimization even without context
+        )
+        
+        logger.info(
+            f"Precompute complete: intent={result.intent}, "
+            f"model={result.recommended_model}, grounded={result.grounded}"
+        )
+        
+        return PrecomputeResponse(
+            optimized_prompt=result.optimized_prompt,
+            context_refs=result.context_refs or [],
+            recommended_model=result.recommended_model,
+            cost_estimate=result.cost_estimate,
+            confidence=result.confidence,
+            intent=result.intent,
+            grounded=result.grounded
+        )
+    
+    except Exception as e:
+        logger.error(f"Precompute error: {e}")
+        return PrecomputeResponse(
+            optimized_prompt=request.text,
+            context_refs=[],
+            recommended_model="gpt-4",
+            cost_estimate="$0.00",
+            confidence=0.0,
+            grounded=False
+        )
 
 if HAS_PRECOMPUTE and precompute_router:
     app.include_router(precompute_router)
     logger.info("✓ DLI Pre-Computation router wired")
 else:
-    logger.warning("DLI Pre-Computation router not available")
+    logger.info("✓ DLI Pre-Computation endpoint available at /api/precompute")
 
 
 if __name__ == "__main__":
