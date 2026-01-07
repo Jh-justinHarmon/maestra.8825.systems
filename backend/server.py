@@ -10,7 +10,7 @@ Endpoints:
 - GET /health - Health check
 """
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import time
@@ -21,6 +21,40 @@ from typing import Optional
 import os
 import sys
 from collections import defaultdict
+
+# Prometheus metrics
+try:
+    from prometheus_client import Counter, Histogram, CONTENT_TYPE_LATEST, generate_latest
+    
+    precompute_requests_total = Counter(
+        'precompute_requests_total',
+        'Total precompute requests'
+    )
+    precompute_latency_seconds = Histogram(
+        'precompute_latency_seconds',
+        'Precompute request latency',
+        buckets=[0.1, 0.25, 0.5, 0.75, 1.0, 2.0, 5.0]
+    )
+    precompute_grounded_total = Counter(
+        'precompute_grounded_total',
+        'Requests with successful grounding'
+    )
+    precompute_refusals_total = Counter(
+        'precompute_refusals_total',
+        'Requests triggering Refusal Contract'
+    )
+    precompute_confidence = Histogram(
+        'precompute_confidence',
+        'Confidence scores',
+        buckets=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    )
+    precompute_errors_total = Counter(
+        'precompute_errors_total',
+        'Total precompute errors'
+    )
+    HAS_PROMETHEUS = True
+except ImportError:
+    HAS_PROMETHEUS = False
 
 from models import (
     AdvisorAskRequest,
@@ -1896,6 +1930,11 @@ async def precompute_endpoint(request: PrecomputeRequest) -> PrecomputeResponse:
     Called by frontend during typing (500ms debounce).
     Returns optimized prompt + context + model recommendation.
     """
+    if HAS_PROMETHEUS:
+        precompute_requests_total.inc()
+    
+    start_time = time.time()
+    
     try:
         if not request.text or len(request.text) < 3:
             return PrecomputeResponse(
@@ -1938,8 +1977,20 @@ async def precompute_endpoint(request: PrecomputeRequest) -> PrecomputeResponse:
             enforce_grounding=False  # Allow optimization even without context
         )
         
+        # Record metrics
+        if HAS_PROMETHEUS:
+            latency = time.time() - start_time
+            precompute_latency_seconds.observe(latency)
+            precompute_confidence.observe(result.confidence)
+            
+            if result.grounded:
+                precompute_grounded_total.inc()
+            
+            if result.refusal_reason:
+                precompute_refusals_total.inc()
+        
         logger.info(
-            f"Precompute complete: intent={result.intent}, "
+            f"Precompute complete: latency={time.time()-start_time:.3f}s intent={result.intent}, "
             f"model={result.recommended_model}, grounded={result.grounded}"
         )
         
@@ -1954,6 +2005,10 @@ async def precompute_endpoint(request: PrecomputeRequest) -> PrecomputeResponse:
         )
     
     except Exception as e:
+        if HAS_PROMETHEUS:
+            precompute_errors_total.inc()
+            precompute_latency_seconds.observe(time.time() - start_time)
+        
         logger.error(f"Precompute error: {e}")
         return PrecomputeResponse(
             optimized_prompt=request.text,
@@ -1963,6 +2018,17 @@ async def precompute_endpoint(request: PrecomputeRequest) -> PrecomputeResponse:
             confidence=0.0,
             grounded=False
         )
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint"""
+    if not HAS_PROMETHEUS:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Prometheus not available"}
+        )
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 if HAS_PRECOMPUTE and precompute_router:
     app.include_router(precompute_router)
