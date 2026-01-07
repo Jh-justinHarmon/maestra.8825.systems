@@ -46,6 +46,8 @@ class StartupVerification:
         self._verify_session_management()
         self._verify_critical_mcps()
         self._verify_authentication()
+        self._verify_ollama_embeddings()
+        self._verify_grounding_sources()
         
         # Report results
         return self._report_results()
@@ -168,6 +170,103 @@ class StartupVerification:
         if reachable_count == 0 and self.production_mode:
             self.failures.append("No critical MCPs reachable")
             logger.error("  ✗ No critical MCPs reachable")
+    
+    def _verify_ollama_embeddings(self) -> None:
+        """Verify Ollama embedding endpoint is available."""
+        logger.info("\n[6/7] Verifying Ollama embeddings...")
+        
+        ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["curl", "-s", f"{ollama_url}/api/tags"],
+                capture_output=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0 and result.stdout:
+                logger.info(f"  ✓ Ollama reachable at {ollama_url}")
+                
+                # Check for embedding model
+                import json
+                try:
+                    data = json.loads(result.stdout)
+                    models = [m.get("name", "") for m in data.get("models", [])]
+                    if any("nomic" in m or "embed" in m.lower() for m in models):
+                        logger.info("  ✓ Embedding model available")
+                    else:
+                        self.warnings.append("No embedding model found (nomic-embed-text recommended)")
+                        logger.warning("  ⚠ No embedding model found")
+                except json.JSONDecodeError:
+                    self.warnings.append("Could not parse Ollama response")
+            else:
+                if self.production_mode:
+                    self.failures.append("Ollama not reachable - embeddings unavailable")
+                    logger.error(f"  ✗ Ollama not reachable at {ollama_url}")
+                else:
+                    self.warnings.append("Ollama not reachable - embeddings unavailable")
+                    logger.warning(f"  ⚠ Ollama not reachable at {ollama_url}")
+        
+        except Exception as e:
+            if self.production_mode:
+                self.failures.append(f"Ollama verification failed: {e}")
+                logger.error(f"  ✗ Ollama verification failed: {e}")
+            else:
+                self.warnings.append(f"Ollama verification failed: {e}")
+                logger.warning(f"  ⚠ Ollama verification failed: {e}")
+    
+    def _verify_grounding_sources(self) -> None:
+        """Verify at least one grounding source is available."""
+        logger.info("\n[7/7] Verifying grounding sources...")
+        
+        sources_available = []
+        
+        # Check library
+        try:
+            workspace_root = find_workspace_root()
+            library = LibraryAccessor(workspace_root)
+            entry_count = library.get_entry_count()
+            if entry_count > 0:
+                sources_available.append(f"library ({entry_count} entries)")
+        except Exception:
+            pass
+        
+        # Check Memory Hub (Jh Brain)
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["curl", "-s", "http://localhost:5160/health"],
+                capture_output=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                sources_available.append("memory_hub (Jh Brain)")
+        except Exception:
+            pass
+        
+        # Check Context Builder MCP
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["curl", "-s", "http://localhost:3000/health"],
+                capture_output=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                sources_available.append("context_builder")
+        except Exception:
+            pass
+        
+        if sources_available:
+            logger.info(f"  ✓ Grounding sources available: {', '.join(sources_available)}")
+        else:
+            if self.production_mode:
+                self.failures.append("No grounding sources available - system cannot ground answers")
+                logger.error("  ✗ No grounding sources available")
+            else:
+                self.warnings.append("No grounding sources available - answers will be ungrounded")
+                logger.warning("  ⚠ No grounding sources available")
     
     def _verify_authentication(self) -> None:
         """Verify authentication system is operational."""

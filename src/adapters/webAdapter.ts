@@ -208,10 +208,12 @@ async function registerSessionCapabilities(
   }
   
   try {
-    await fetch(`${API_BASE}/api/maestra/session/${sessionId}/capabilities`, {
+    const apiBase = await getApiBase();
+    await fetch(`${apiBase}/api/maestra/session/${sessionId}/capabilities`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        session_id: sessionId,
         library_id: handshake.libraryId,
         jwt: handshake.jwt,
         capabilities: handshake.capabilities || []

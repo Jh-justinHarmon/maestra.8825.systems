@@ -56,6 +56,15 @@ from conversation_save_service import save_conversation_from_maestra, save_conve
 from startup_verification import verify_startup, crash_if_startup_fails
 from epistemic import EpistemicState
 
+# DLI Pre-Computation Integration
+try:
+    from precompute import router as precompute_router
+    HAS_PRECOMPUTE = True
+except ImportError as e:
+    logger.warning(f"Precompute router unavailable: {e}")
+    HAS_PRECOMPUTE = False
+    precompute_router = None
+
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
 llm_call_counter = defaultdict(int)  # date -> count
@@ -1719,6 +1728,17 @@ async def search_library(q: str = "", limit: int = 10):
     except Exception as e:
         logger.error(f"Library search error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# DLI Pre-Computation Router
+# ============================================================================
+
+if HAS_PRECOMPUTE and precompute_router:
+    app.include_router(precompute_router)
+    logger.info("✓ DLI Pre-Computation router wired")
+else:
+    logger.warning("DLI Pre-Computation router not available")
 
 
 if __name__ == "__main__":
