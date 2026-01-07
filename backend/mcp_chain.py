@@ -72,6 +72,10 @@ class MCPChain:
                 MCPStep("extract_patterns", "context_builder", "previous_step", "k_ids"),
                 MCPStep("apply_patterns", "jh_brain", "previous_step", "patterns"),
             ],
+            "generic_with_context": [
+                MCPStep("gather_context", "context_builder", "query"),
+                MCPStep("enrich_with_library", "library_bridge", "query", required=False),
+            ],
         }
     
     def get_chain_for_query(self, query: str, routing_info: Dict) -> Optional[List[MCPStep]]:
@@ -84,6 +88,7 @@ class MCPChain:
             "pattern": "pattern_matching",
             "research": "research_with_context",
             "comparison": "research_with_context",
+            "generic": "generic_with_context",
         }
         
         chain_name = chain_map.get(pattern)
@@ -191,20 +196,84 @@ class MCPChain:
         input_data: Any,
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Execute a single MCP step (simulated)."""
-        # In production, this would call actual MCP endpoints
-        # For now, return simulated results
+        """Execute a single MCP step by calling the actual MCP server."""
+        import subprocess
+        import json
+        import os
+        from pathlib import Path
         
-        await asyncio.sleep(0.1)  # Simulate network latency
+        # Workspace-agnostic path resolution
+        try:
+            from library_accessor import find_workspace_root
+            workspace_root = find_workspace_root()
+        except Exception as e:
+            logger.error(f"Cannot find workspace root: {e}")
+            raise RuntimeError("Workspace root not found")
         
-        return {
-            "step": step.name,
-            "mcp": step.mcp_type,
-            "input": str(input_data)[:50],
-            "output": f"Result from {step.mcp_type}",
-            "confidence": 0.85,
-            "timestamp": datetime.utcnow().isoformat()
+        # Map MCP types to their relative server paths
+        mcp_servers = {
+            "context_builder": "mcp_servers/context-builder/server.js",
+            "library_bridge": "mcp_servers/library-bridge/server.js",
+            "deep_research": "mcp_servers/deep-research-mcp/server.js",
+            "project_planning": "mcp_servers/project-planning/server.js",
         }
+        
+        relative_path = mcp_servers.get(step.mcp_type)
+        if not relative_path:
+            raise ValueError(f"Unknown MCP type: {step.mcp_type}")
+        
+        server_path = os.path.join(workspace_root, relative_path)
+        
+        if not os.path.exists(server_path):
+            logger.error(f"MCP server not found at {server_path}")
+            raise RuntimeError(f"MCP server not found: {step.mcp_type}")
+        
+        try:
+            # Call the actual MCP server via subprocess
+            proc = subprocess.Popen(
+                ["node", server_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Send request to MCP
+            request = json.dumps({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": f"{step.mcp_type}_tool",
+                    "arguments": {"query": str(input_data) if input_data else ""}
+                }
+            })
+            
+            stdout, stderr = proc.communicate(input=request, timeout=step.timeout_ms / 1000)
+            
+            if proc.returncode != 0:
+                logger.error(f"MCP {step.mcp_type} failed: {stderr}")
+                raise RuntimeError(f"MCP execution failed: {stderr}")
+            
+            # Parse MCP response
+            response = json.loads(stdout) if stdout else {}
+            
+            logger.info(f"MCP {step.mcp_type} executed successfully for step: {step.name}")
+            
+            return {
+                "step": step.name,
+                "mcp": step.mcp_type,
+                "result": response.get("result", {}),
+                "confidence": response.get("confidence", 0.7),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"MCP {step.mcp_type} timed out")
+            raise RuntimeError(f"MCP {step.mcp_type} timed out after {step.timeout_ms}ms")
+        except Exception as e:
+            logger.error(f"Error executing MCP {step.mcp_type}: {e}")
+            raise
 
 # Global chain orchestrator
 chain_orchestrator = MCPChain()

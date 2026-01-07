@@ -63,8 +63,24 @@ async function determineConnectionMode(): Promise<void> {
   
   connectionState.lastHealthCheck = now;
   
-  // Priority 1: Quad-Core (Sidecar + Handshake)
+  // Priority 1: Quad-Core (Sidecar + Local Backend)
   const sidecarHealthy = await healthCheck('http://localhost:8826', 1000);
+  const localBackendHealthy = await healthCheck('http://localhost:8825', 1000);
+  
+  if (sidecarHealthy && localBackendHealthy) {
+    const handshake = await attemptHandshake();
+    if (handshake) {
+      connectionState.mode = 'quad-core';
+      connectionState.apiBase = 'http://localhost:8825';  // Use LOCAL backend for full context
+      connectionState.sidecarAvailable = true;
+      connectionState.localBackendAvailable = true;
+      connectionState.handshakeData = handshake;
+      console.log('[Maestra] Connected: Quad-Core mode (local backend + sidecar)');
+      return;
+    }
+  }
+  
+  // Priority 1b: Sidecar only (fallback to hosted backend)
   if (sidecarHealthy) {
     const handshake = await attemptHandshake();
     if (handshake) {
@@ -73,7 +89,7 @@ async function determineConnectionMode(): Promise<void> {
       connectionState.sidecarAvailable = true;
       connectionState.localBackendAvailable = false;
       connectionState.handshakeData = handshake;
-      console.log('[Maestra] Connected: Quad-Core mode');
+      console.log('[Maestra] Connected: Quad-Core mode (hosted backend + sidecar)');
       return;
     }
   }
@@ -269,7 +285,8 @@ export const webAdapter: Adapter = {
       // Merge conversation history into client context
       const enrichedContext = clientContext ? { ...clientContext, conversation_history: conversationHistory } : { conversation_history: conversationHistory };
       
-      const backendPromise = fetch(`${API_BASE}/api/maestra/advisor/ask`, {
+      const apiBase = await getApiBase();
+      const backendPromise = fetch(`${apiBase}/api/maestra/advisor/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

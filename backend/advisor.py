@@ -29,6 +29,13 @@ from optimization import (
     performance_monitor
 )
 from llm_router import chat_completion
+from library_accessor import LibraryAccessor, ContextIndexAccessor, find_workspace_root
+from epistemic import (
+    EpistemicState, GroundingSourceType, GroundingSource, GroundingResult,
+    classify_query, verify_grounding, EpistemicResponse,
+    create_refused_response, create_grounded_response, create_ungrounded_response
+)
+from context_injection import inject_context_into_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +68,46 @@ def _load_8825_knowledge() -> str:
         _8825_KNOWLEDGE = ""
     
     return _8825_KNOWLEDGE
+
+
+def search_8825_library(query: str, max_entries: int = 5) -> tuple[List[GroundingSource], bool]:
+    """
+    Search the 8825 library for relevant context.
+    
+    Returns: (grounding_sources, sources_found)
+    - grounding_sources: List of GroundingSource objects with actual entries
+    - sources_found: True if any sources were found, False if empty
+    """
+    try:
+        workspace_root = find_workspace_root()
+        library = LibraryAccessor(workspace_root)
+        
+        # Search system library
+        entries = library.search(query, max_entries=max_entries)
+        
+        if not entries:
+            logger.info(f"Library search found no entries for: {query[:50]}")
+            return [], False
+        
+        # Convert to GroundingSource objects
+        sources = []
+        for entry in entries:
+            source = GroundingSource(
+                source_type=GroundingSourceType.LIBRARY,
+                identifier=entry.entry_id,
+                title=entry.title,
+                confidence=entry.confidence,
+                excerpt=entry.content[:200] if entry.content else None,
+                timestamp=entry.timestamp
+            )
+            sources.append(source)
+        
+        logger.info(f"Library search found {len(sources)} entries for: {query[:50]}")
+        return sources, True
+    
+    except Exception as e:
+        logger.error(f"Library search error: {e}")
+        return [], False
 
 
 async def get_context_from_brain(topic: str, focus: str = "global") -> Tuple[str, List[SourceReference]]:
@@ -258,7 +305,8 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     logger.info(f"Session has {len(previous_context['recent_turns'])} recent turns")
     
     # Route query to appropriate capabilities
-    session_capabilities = []
+    # Always include context_builder and library_bridge - they're local file-based, always available
+    session_capabilities = ["context_builder", "library_bridge"]
     if has_capability(request.session_id, "context_for_query"):
         session_capabilities.append("local_companion")
     if has_capability(request.session_id, "open_loops"):
@@ -332,6 +380,7 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     
     # Check if we should use MCP chaining for this query
     chain = await get_chain_for_query(question, routing)
+    print(f"[DEBUG] Chain returned: {chain is not None}, routing pattern: {routing.get('pattern')}")
     if chain:
         logger.info(f"Using MCP chain with {len(chain)} steps")
         chain_result = await execute_mcp_chain(
@@ -348,12 +397,61 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 confidence=0.9,
                 excerpt=f"Executed: {', '.join(chain_result.steps_executed)}"
             ))
+            # Inject chain context into the prompt
+            chain_context = chain_result.results.get("gather_context", {}).get("context_text", "")
+            if chain_context:
+                library_context += f"\n\n--- MEMORY CONTEXT ---\n{chain_context}"
+                logger.info(f"Added chain context ({len(chain_context)} chars) to prompt")
     
-    # Legacy stubs remain for optional Jh Brain wiring, but are no longer used for synthesis by default.
-    context, context_sources = await get_context_from_brain(topic=question, focus="global")
-    guidance, guidance_sources = await get_guidance_from_brain(request=question, task_type="analyze")
-    all_sources.extend(context_sources)
-    all_sources.extend(guidance_sources)
+    # Gather grounding sources from library
+    library_sources, library_found = search_8825_library(question)
+    
+    # Classify query to determine if grounding is required
+    query_type = classify_query(question)
+    grounding_result = verify_grounding(
+        query=question,
+        sources=library_sources,
+        trace_id=trace_id
+    )
+    
+    logger.info(f"Query type: {query_type.value}, Grounding required: {grounding_result.requires_grounding}, Sources found: {library_found}")
+    
+    # If grounding is required but no sources found, refuse to answer
+    if grounding_result.requires_grounding and not library_found:
+        logger.warning(f"Query requires grounding but no sources found: {question[:50]}")
+        
+        # Return REFUSED response
+        refused_response = create_refused_response(
+            query=question,
+            trace_id=trace_id,
+            what_would_help=[
+                "Library entries about this topic",
+                "Recent decisions or context",
+                "Project history or background"
+            ]
+        )
+        
+        return AdvisorAskResponse(
+            answer=refused_response.answer,
+            trace_id=trace_id,
+            session_id=request.session_id,
+            mode="quick",
+            sources=[],
+            epistemic_state=refused_response.epistemic_state.value,
+            grounding_sources=refused_response.grounding_sources,
+            confidence=refused_response.confidence
+        )
+    
+    # Add library sources to all_sources
+    if library_sources:
+        for source in library_sources:
+            all_sources.append(SourceReference(
+                title=source.title,
+                type="library",
+                confidence=source.confidence,
+                excerpt=source.excerpt or ""
+            ))
+        logger.info(f"Added {len(library_sources)} library sources to response")
     
     # Add routing info to sources
     all_sources.append(SourceReference(
@@ -363,10 +461,17 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         excerpt=f"Query pattern detected: {routing['pattern']}"
     ))
     
-    system_prompt = (
+    # Determine epistemic state based on grounding
+    if grounding_result.requires_grounding and library_found:
+        epistemic_state = EpistemicState.GROUNDED
+    elif not grounding_result.requires_grounding:
+        epistemic_state = EpistemicState.UNGROUNDED
+    else:
+        epistemic_state = EpistemicState.REFUSED
+    
+    # Build base system prompt
+    base_system_prompt = (
         "You are Maestra, the AI assistant for 8825 - a platform that amplifies human operators with AI.\n\n"
-        f"{guidance}\n\n"
-        f"{context}\n\n"
         "IMPORTANT: If the user provides a PAGE SNAPSHOT in the request (domain/url/title/visible text/selection), "
         "treat it as an authoritative description of what they are seeing. Use it to answer questions like "
         "'what website am I on' or 'can you see what I am seeing' without guessing. "
@@ -374,30 +479,25 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         "LIBRARY ENTRIES: If the user references an Entry ID (16-character hex string like '5ce9e4d4f0f23d90'), "
         "the content from that library entry will be provided below. Use it to answer their question with full context."
     )
-
-    user_prompt = f"User question: {question}"
     
-    # Add library context if any Entry IDs were found and loaded
+    # Build chain results dictionary for context injection
+    chain_results = {}
     if library_context:
-        user_prompt += f"\n\n--- LIBRARY CONTEXT ---{library_context}"
-        all_sources.append(SourceReference(
-            title=f"Library Entries ({len(entry_id_matches)} loaded)",
-            type="library",
-            confidence=0.95,
-            excerpt=f"Entry IDs: {', '.join(entry_id_matches)}"
-        ))
-    
-    # Add conversation history if available
-    if previous_context.get('recent_turns'):
-        user_prompt += f"\n\nRecent conversation:\n{str(previous_context.get('recent_turns', []))[:1500]}"
-
+        chain_results["library_context"] = library_context
     if client_context_text:
-        user_prompt += f"\n\nAdditional context:\n{client_context_text}"
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
+        chain_results["client_context"] = client_context_text
+    if previous_context.get('recent_turns'):
+        chain_results["conversation_history"] = str(previous_context.get('recent_turns', []))[:1500]
+    
+    # Use context injection to build messages with verified grounding
+    messages = inject_context_into_prompt(
+        query=question,
+        chain_results=chain_results,
+        grounding_sources=library_sources,
+        epistemic_state=epistemic_state
+    )
+    
+    logger.info(f"Built messages with epistemic_state={epistemic_state.value}, sources={len(library_sources)}")
 
     # Record user message in session continuity (for conversation feed)
     add_turn(
@@ -407,6 +507,7 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         content=question,
         metadata={
             "mode": request.mode,
+            "epistemic_state": epistemic_state.value,
             "has_page_snapshot": bool(request.client_context and request.client_context.get('page_snapshot'))
         }
     )
@@ -435,11 +536,25 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         metadata={
             "mode": "quick",
             "routing_pattern": routing['pattern'],
-            "sources_count": len(all_sources)
+            "sources_count": len(all_sources),
+            "epistemic_state": epistemic_state.value
         }
     )
     
     processing_time = int((time.time() - start_time) * 1000)
+    
+    # Convert grounding sources to response format
+    grounding_sources_response = [
+        {
+            "type": source.source_type.value,
+            "identifier": source.identifier,
+            "title": source.title,
+            "confidence": source.confidence,
+            "excerpt": source.excerpt,
+            "timestamp": source.timestamp
+        }
+        for source in library_sources
+    ]
     
     return AdvisorAskResponse(
         answer=answer,
@@ -448,7 +563,10 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         sources=all_sources,
         trace_id=trace_id,
         mode="quick",
-        processing_time_ms=processing_time
+        processing_time_ms=processing_time,
+        epistemic_state=epistemic_state.value,
+        grounding_sources=grounding_sources_response,
+        confidence=grounding_result.confidence
     )
 
 

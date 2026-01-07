@@ -53,6 +53,8 @@ from sync import ConversationSyncer, SyncScheduler, SyncPayload, set_sync_schedu
 from database import get_db_manager
 from audit_trail import audit_trail
 from conversation_save_service import save_conversation_from_maestra, save_conversation_from_cascade
+from startup_verification import verify_startup, crash_if_startup_fails
+from epistemic import EpistemicState
 
 # Setup logging
 # LLM call tracking (in-memory; resets on restart)
@@ -1721,5 +1723,17 @@ async def search_library(q: str = "", limit: int = 10):
 
 if __name__ == "__main__":
     import uvicorn
+    
+    # Run startup verification
+    production_mode = os.getenv("ENVIRONMENT", "development") == "production"
+    logger.info(f"Starting Maestra backend in {'PRODUCTION' if production_mode else 'DEVELOPMENT'} mode")
+    
+    if not verify_startup(production_mode=production_mode):
+        if production_mode:
+            logger.error("Startup verification failed in production mode. Exiting.")
+            sys.exit(1)
+        else:
+            logger.warning("Startup verification failed in development mode. Proceeding with warnings.")
+    
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
