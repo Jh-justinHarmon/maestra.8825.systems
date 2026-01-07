@@ -490,6 +490,83 @@ async def sync_conversations(request: Request):
     }
 
 
+@app.get("/health/deep")
+async def deep_health_check():
+    """
+    Deep health check validating critical dependencies.
+    Returns 503 if any critical component unavailable.
+    """
+    checks = {
+        "server": True,
+        "database": False,
+        "promptgen_import": False,
+        "promptgen_functional": False,
+        "context_builder": False,
+    }
+    errors = []
+    
+    # Check PromptGen import
+    try:
+        if HAS_PROMPTGEN and PromptGenAgent:
+            checks["promptgen_import"] = True
+        else:
+            errors.append("PromptGen: Module not imported")
+    except Exception as e:
+        errors.append(f"PromptGen import: {str(e)}")
+    
+    # Check PromptGen functional (run dummy refinement)
+    if checks["promptgen_import"]:
+        try:
+            agent = get_precompute_agent()
+            if agent:
+                result = await agent.refine_with_context(
+                    "test query",
+                    gather_context=False,
+                    enforce_grounding=False
+                )
+                if result and result.intent:
+                    checks["promptgen_functional"] = True
+                else:
+                    errors.append("PromptGen: Returned invalid result")
+        except Exception as e:
+            errors.append(f"PromptGen functional: {str(e)}")
+    
+    # Check Context Builder (Library access)
+    try:
+        library_path = Path.home() / "Hammer Consulting Dropbox" / "Justin Harmon" / "8825-Team" / "shared" / "8825-library"
+        if library_path.exists() and list(library_path.glob("*.json")):
+            checks["context_builder"] = True
+        else:
+            errors.append("Context Builder: Library path not accessible or empty")
+    except Exception as e:
+        errors.append(f"Context Builder: {str(e)}")
+    
+    # Check database
+    try:
+        db = get_db_manager()
+        if db:
+            checks["database"] = True
+    except Exception:
+        pass
+    
+    # Determine overall health
+    critical_checks = ["promptgen_import", "promptgen_functional"]
+    all_critical_passing = all(checks.get(k, False) for k in critical_checks)
+    
+    status_code = 200 if all_critical_passing else 503
+    
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "healthy" if all_critical_passing else "unhealthy",
+            "checks": checks,
+            "errors": errors if errors else None,
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "1.0.0"
+        }
+    )
+
+
 @app.get("/health")
 async def health_check() -> HealthResponse:
     """
