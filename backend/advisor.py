@@ -64,23 +64,23 @@ if MINIMAL_MODE:
         """No MCP execution in minimal mode."""
         return []
     
-    def add_turn(session_id: str, role: str, content: str):
-        """No-op in minimal mode."""
+    def add_turn(session_id: str, **kwargs):
+        """No-op in minimal mode. Accepts any parameters."""
         pass
     
-    def get_context_for_next_turn(session_id: str):
+    def get_context_for_next_turn(session_id: str, **kwargs):
         """No context in minimal mode."""
         return ""
     
-    def get_session_summary(session_id: str):
+    def get_session_summary(session_id: str, **kwargs):
         """No summary in minimal mode."""
         return ""
     
-    def accumulate_context(session_id: str, context: str):
+    def accumulate_context(session_id: str, context: str, **kwargs):
         """No-op in minimal mode."""
         pass
     
-    def record_decision(session_id: str, decision: str):
+    def record_decision(session_id: str, decision: str, **kwargs):
         """No-op in minimal mode."""
         pass
 
