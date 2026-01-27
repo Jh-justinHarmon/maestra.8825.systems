@@ -4,6 +4,8 @@ Maestra Backend - Advisor Logic
 Handles /advisor/ask endpoint logic.
 Uses Jh Brain for context and guidance, Memory Hub for session tracking.
 Routes queries to appropriate MCPs based on query type.
+
+MAESTRA_MINIMAL_MODE: When enabled, uses stubs instead of system dependencies.
 """
 import os
 import sys
@@ -14,35 +16,112 @@ import asyncio
 from pathlib import Path
 from typing import Optional, List, Tuple
 
-# Add parent paths for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# =============================================================================
+# MINIMAL MODE CONFIGURATION
+# =============================================================================
 
-# Add system/agents to path for agent_registry
-AGENTS_PATH = Path(__file__).parent.parent.parent.parent / "system" / "agents"
-sys.path.insert(0, str(AGENTS_PATH))
+MINIMAL_MODE = os.getenv("MAESTRA_MINIMAL_MODE", "false").lower() == "true"
 
-from agent_registry import get_agent
-from agent_telemetry import log_agent_event
+if MINIMAL_MODE:
+    logger = logging.getLogger(__name__)
+    logger.info("🟢 MAESTRA_MINIMAL_MODE enabled - using stubs")
+    
+    # Use stubs instead of system imports
+    from stubs.stub_agent_registry import get_agent
+    from stubs.stub_agent_telemetry import log_agent_event
+    from stubs.stub_routed_memory import search_memory
+    
+    # Stub functions for features not available in minimal mode
+    def ensure_session_initialized(session_id: str):
+        """No-op in minimal mode."""
+        pass
+    
+    def get_session_router_state(session_id: str):
+        """Returns None in minimal mode."""
+        return None
+    
+    def is_personal_enabled(session_id: str) -> bool:
+        """Always False in minimal mode."""
+        return False
+    
+    def has_capability(session_id: str, capability: str) -> bool:
+        """No capabilities in minimal mode."""
+        return False
+    
+    def get_library_id(session_id: str) -> Optional[str]:
+        """No library in minimal mode."""
+        return None
+    
+    def route_query(query: str, session_id: str):
+        """No routing in minimal mode."""
+        return None
+    
+    def get_chain_for_query(query: str):
+        """No MCP chains in minimal mode."""
+        return None
+    
+    def execute_mcp_chain(chain, query: str, session_id: str):
+        """No MCP execution in minimal mode."""
+        return []
+    
+    def add_turn(session_id: str, role: str, content: str):
+        """No-op in minimal mode."""
+        pass
+    
+    def get_context_for_next_turn(session_id: str):
+        """No context in minimal mode."""
+        return ""
+    
+    def get_session_summary(session_id: str):
+        """No summary in minimal mode."""
+        return ""
+    
+    def accumulate_context(session_id: str, context: str):
+        """No-op in minimal mode."""
+        pass
+    
+    def record_decision(session_id: str, decision: str):
+        """No-op in minimal mode."""
+        pass
+
+else:
+    logger = logging.getLogger(__name__)
+    logger.info("🔴 MAESTRA_MINIMAL_MODE disabled - using full system")
+    
+    # Add parent paths for imports
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    # Add system/agents to path for agent_registry
+    AGENTS_PATH = Path(__file__).parent.parent.parent.parent / "system" / "agents"
+    sys.path.insert(0, str(AGENTS_PATH))
+    
+    from agent_registry import get_agent
+    from agent_telemetry import log_agent_event
+    
+    from capability_router import route_query
+    from session_manager import has_capability, get_library_id
+    from mcp_chain import get_chain_for_query, execute_mcp_chain
+    from session_continuity import (
+        add_turn, get_context_for_next_turn, get_session_summary,
+        accumulate_context, record_decision
+    )
+    from routed_memory import (
+        search_memory,
+        ensure_session_initialized,
+        get_session_router_state,
+        is_personal_enabled
+    )
+
+# =============================================================================
+# COMMON IMPORTS (Available in both modes)
+# =============================================================================
 
 from models import AdvisorAskRequest, AdvisorAskResponse, SourceReference
-from capability_router import route_query
-from session_manager import has_capability, get_library_id
-from mcp_chain import get_chain_for_query, execute_mcp_chain
-from session_continuity import (
-    add_turn, get_context_for_next_turn, get_session_summary,
-    accumulate_context, record_decision
-)
 from optimization import (
     cached_query, monitored_endpoint, speculative_executor,
     performance_monitor
 )
 from llm_router import chat_completion
-from routed_memory import (
-    search_memory,
-    ensure_session_initialized,
-    get_session_router_state,
-    is_personal_enabled
-)
 from epistemic import (
     EpistemicState, GroundingSourceType, GroundingSource, GroundingResult,
     classify_query, verify_grounding, EpistemicResponse,
