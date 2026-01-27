@@ -135,12 +135,16 @@ def validate_system_dependencies():
     
     logger.info("✅ All system dependencies validated")
 
-# Run validation on import
-try:
-    validate_system_dependencies()
-except RuntimeError as e:
-    logger.critical(str(e))
-    raise
+# Run validation on import (skip in minimal mode)
+MINIMAL_MODE = os.getenv("MAESTRA_MINIMAL_MODE", "false").lower() == "true"
+if not MINIMAL_MODE:
+    try:
+        validate_system_dependencies()
+    except RuntimeError as e:
+        logger.critical(str(e))
+        raise
+else:
+    logger.info("🟢 MAESTRA_MINIMAL_MODE enabled - skipping system dependency validation")
 
 # DLI Pre-Computation Integration
 try:
