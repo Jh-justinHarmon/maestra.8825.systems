@@ -62,11 +62,11 @@ class ConversationSaveService:
         logger.info(f"ConversationSaveService initialized with library at {self.library_path}")
     
     def _find_library_path(self) -> Path:
-        """Find 8825_core/library directory"""
+        """Find 8825/system/library directory (MIGRATED 2026-01-16)"""
         candidates = [
-            Path.home() / "Hammer Consulting Dropbox/Justin Harmon/8825-Team/users/justin_harmon/8825-Jh/8825_core/library",
-            Path("/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/users/justin_harmon/8825-Jh/8825_core/library"),
-            Path.cwd().parent.parent.parent / "8825_core/library",
+            Path.home() / "Hammer Consulting Dropbox/Justin Harmon/8825-Team/8825/system/library",
+            Path("/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/8825/system/library"),
+            Path.cwd().parent.parent.parent / "8825/system/library",
         ]
         
         for candidate in candidates:

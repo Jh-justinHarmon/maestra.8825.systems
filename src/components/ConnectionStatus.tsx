@@ -29,18 +29,47 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
 
   // Poll connection state every 2 seconds
   useEffect(() => {
-    const interval = setInterval(() => {
+    // Initial check on mount
+    const updateState = async () => {
       const currentMode = getConnectionMode();
       const currentState = getConnectionState();
       
+      // 🔥 DEV-ONLY: Detect frontend state desync
+      if (process.env.NODE_ENV === 'development') {
+        try {
+          const sessionId = localStorage.getItem('maestra_session_id');
+          if (sessionId) {
+            const debugResponse = await fetch(`http://localhost:8825/debug/session/${sessionId}`);
+            if (debugResponse.ok) {
+              const debugData = await debugResponse.json();
+              
+              if (debugData.router?.authenticated === true &&
+                  debugData.router?.mode === 'system_plus_personal' &&
+                  currentMode !== 'quad-core') {
+                console.error('🚨 FRONTEND STATE DESYNC', {
+                  frontend_mode: currentMode,
+                  backend_mode: debugData.router.mode,
+                  backend_authenticated: debugData.router.authenticated,
+                  session_id: sessionId
+                });
+              }
+            }
+          }
+        } catch (e) {
+          // Silently fail if debug endpoint unavailable
+        }
+      }
+      
       if (currentMode !== mode) {
         setMode(currentMode);
-        // Show brief notification on mode change
         console.log(`[Maestra] Connection mode changed: ${mode} → ${currentMode}`);
       }
       
       setState(currentState);
-    }, 2000);
+    };
+    
+    updateState(); // Run immediately
+    const interval = setInterval(updateState, 2000);
 
     return () => clearInterval(interval);
   }, [mode]);

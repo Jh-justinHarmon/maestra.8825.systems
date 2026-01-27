@@ -1,5 +1,6 @@
 import { SCHEMA_VERSION } from './types';
 import type { Adapter, Response, ContextResult, CaptureResult, Context } from './types';
+import { getOrCreateDeviceId } from '../lib/deviceId';
 
 // ============================================================================
 // Tri-State Connection Hierarchy
@@ -26,9 +27,62 @@ let connectionState: ConnectionState = {
   lastHealthCheck: 0,
 };
 
+// Track quad-core activation (persists for session)
+let quadCoreActivated = false;
+let responsesWithoutPersonalMemory = 0;
+
+// Session state
+let currentSessionId: string | null = null;
+let deviceId: string | null = null;
+
 // Export for UI consumption
 export const getConnectionMode = (): ConnectionMode => connectionState.mode;
 export const getConnectionState = (): ConnectionState => ({ ...connectionState });
+
+/**
+ * Perform session handshake to get or create session
+ */
+async function performSessionHandshake(): Promise<string> {
+  // Return cached session if available
+  if (currentSessionId) {
+    return currentSessionId;
+  }
+  
+  // Get or create device ID
+  if (!deviceId) {
+    deviceId = await getOrCreateDeviceId();
+  }
+  
+  try {
+    const apiBase = await getApiBase();
+    const response = await fetch(`${apiBase}/api/maestra/session/handshake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: deviceId,
+        surface: 'web_app',
+        user_id: 'anonymous'
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Session handshake failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const sessionId = data.session_id as string;
+    currentSessionId = sessionId;
+    
+    console.log(`[SESSION] device_id=${deviceId}, session_id=${sessionId}, surface=web_app, is_new=${data.is_new_session}`);
+    
+    return sessionId;
+  } catch (error) {
+    console.error('[SESSION] Handshake failed, using fallback session ID', error);
+    // Fallback to generated session ID
+    currentSessionId = `fallback_${Date.now()}`;
+    return currentSessionId;
+  }
+}
 
 /**
  * Health check with timeout
@@ -55,66 +109,56 @@ async function healthCheck(url: string, timeoutMs: number = 1000): Promise<boole
  */
 async function determineConnectionMode(): Promise<void> {
   const now = Date.now();
-  
-  // Only check every 5 seconds to avoid hammering services
-  if (now - connectionState.lastHealthCheck < 5000) {
-    return;
-  }
-  
+  if (now - connectionState.lastHealthCheck < 5000) return;
   connectionState.lastHealthCheck = now;
-  
-  // Priority 1: Quad-Core (Sidecar + Local Backend)
-  const sidecarHealthy = await healthCheck('http://localhost:8826', 1000);
-  const localBackendHealthy = await healthCheck('http://localhost:8825', 1000);
-  
-  if (sidecarHealthy && localBackendHealthy) {
-    const handshake = await attemptHandshake();
-    if (handshake) {
-      connectionState.mode = 'quad-core';
-      connectionState.apiBase = 'http://localhost:8825';  // Use LOCAL backend for full context
-      connectionState.sidecarAvailable = true;
-      connectionState.localBackendAvailable = true;
-      connectionState.handshakeData = handshake;
-      console.log('[Maestra] Connected: Quad-Core mode (local backend + sidecar)');
-      return;
-    }
-  }
-  
-  // Priority 1b: Sidecar only (fallback to hosted backend)
-  if (sidecarHealthy) {
-    const handshake = await attemptHandshake();
-    if (handshake) {
-      connectionState.mode = 'quad-core';
-      connectionState.apiBase = 'https://maestra-backend-8825-systems.fly.dev';
-      connectionState.sidecarAvailable = true;
-      connectionState.localBackendAvailable = false;
-      connectionState.handshakeData = handshake;
-      console.log('[Maestra] Connected: Quad-Core mode (hosted backend + sidecar)');
-      return;
-    }
-  }
-  
-  connectionState.sidecarAvailable = false;
-  
-  // Priority 2: Local Backend
+
   const localHealthy = await healthCheck('http://localhost:8825', 1000);
+
   if (localHealthy) {
+    // DEV-ONLY: Check /debug/session for auth state
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        const sessionId = localStorage.getItem('maestra_session_id');
+        if (sessionId) {
+          const res = await fetch(`http://localhost:8825/debug/session/${sessionId}`);
+          if (res.ok) {
+            const debug = await res.json();
+
+            if (
+              debug.router?.authenticated === true &&
+              debug.router?.mode === 'system_plus_personal'
+            ) {
+              const wasQuadCore = connectionState.mode === 'quad-core';
+              connectionState.mode = 'quad-core';
+              connectionState.apiBase = 'http://localhost:8825';
+              connectionState.localBackendAvailable = true;
+              connectionState.sidecarAvailable = false;
+              
+              if (!wasQuadCore) {
+                console.log('[Maestra] Quad-Core ACTIVE (authenticated + personal memory)');
+              }
+              return;
+            }
+          }
+        }
+      } catch {
+        // fall through
+      }
+    }
+
     connectionState.mode = 'local';
     connectionState.apiBase = 'http://localhost:8825';
     connectionState.localBackendAvailable = true;
     connectionState.sidecarAvailable = false;
-    console.log('[Maestra] Connected: Local mode');
+    console.log('[Maestra] Local backend only');
     return;
   }
-  
-  connectionState.localBackendAvailable = false;
-  
-  // Priority 3: Hosted Backend (fallback)
+
   connectionState.mode = 'cloud-only';
   connectionState.apiBase = 'https://maestra-backend-8825-systems.fly.dev';
-  connectionState.sidecarAvailable = false;
   connectionState.localBackendAvailable = false;
-  console.log('[Maestra] Connected: Cloud-only mode (limited context)');
+  connectionState.sidecarAvailable = false;
+  console.log('[Maestra] Cloud only');
 }
 
 /**
@@ -228,6 +272,9 @@ async function registerSessionCapabilities(
 export const webAdapter: Adapter = {
   async sendMessage(conversationId: string, message: string, context?: Context, messages?: any[]): Promise<Response> {
     try {
+      // Perform session handshake on first message to get session_id
+      const sessionId = await performSessionHandshake();
+      
       // Determine optimal connection mode before sending
       await determineConnectionMode();
       
@@ -292,7 +339,7 @@ export const webAdapter: Adapter = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: conversationId,
+          session_id: sessionId,
           question: message,
           mode: 'quick',
           context_hints: context?.selection ? ['selection'] : [],
@@ -309,6 +356,27 @@ export const webAdapter: Adapter = {
       
       const data = await response.json();
       
+      // PRODUCTION: Detect quad-core from real response
+      const sources = data.sources || [];
+      const hasPersonalMemory = sources.some((s: string) => s.startsWith('personal:'));
+      const isSystemPlusPersonal = data.mode === 'system_plus_personal';
+      
+      if ((hasPersonalMemory || isSystemPlusPersonal) && !quadCoreActivated) {
+        quadCoreActivated = true;
+        connectionState.mode = 'quad-core';
+        responsesWithoutPersonalMemory = 0;
+        console.log('[Maestra] Quad-Core ACTIVE (detected from response)');
+      } else if (quadCoreActivated && !hasPersonalMemory) {
+        responsesWithoutPersonalMemory++;
+        
+        // PROD-SAFE ASSERTION: Warn if quad-core active but no personal memory for >3 responses
+        if (responsesWithoutPersonalMemory > 3) {
+          console.warn('[Maestra] Quad-Core active but no personal memory detected in last 3+ responses');
+        }
+      } else if (quadCoreActivated && hasPersonalMemory) {
+        responsesWithoutPersonalMemory = 0;
+      }
+      
       // Register handshake in background (non-blocking)
       handshakePromise.then(handshake => {
         if (handshake) {
@@ -324,6 +392,8 @@ export const webAdapter: Adapter = {
           role: 'assistant',
           content: data.answer,
           timestamp: new Date().toISOString(),
+          sources: data.sources || [],
+          mode: data.mode,
         },
       };
     } catch (error) {
@@ -373,7 +443,7 @@ export const webAdapter: Adapter = {
     }
   },
 
-  async capture(payload: { content: string; context?: Context }): Promise<CaptureResult> {
+  async capture(payload: { content: string; context?: Context }, sessionId: string): Promise<CaptureResult> {
     try {
       // Capture is handled by the backend's advisor/ask endpoint
       // The content becomes the question, and we mark it as a capture
@@ -381,7 +451,7 @@ export const webAdapter: Adapter = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: `capture_${generateId()}`,
+          session_id: sessionId,  // Use same session_id as other requests
           question: payload.content || (payload.context?.selection || 'Capture'),
           mode: 'quick',
           context_hints: ['capture'],

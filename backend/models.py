@@ -52,6 +52,7 @@ class AdvisorAskResponse(BaseModel):
     processing_time_ms: int = Field(default=0, description="Processing time in milliseconds")
     conversation_id: Optional[str] = Field(None, description="Loaded conversation ID (if loading a conversation)")
     turns: Optional[List[dict]] = Field(None, description="Conversation turns (if loading a conversation)")
+    agent: Optional[dict] = Field(None, description="Agent that generated this response")
 
 
 # ============================================================================
@@ -124,6 +125,29 @@ class SmartPDFImportResponse(BaseModel):
     library_entry_id: Optional[str] = None
     imported_at: str = Field(..., description="ISO 8601 timestamp")
     trace_id: str = Field(..., description="Unique trace ID for debugging")
+
+
+# ============================================================================
+# Session Models
+# ============================================================================
+
+class SessionHandshakeRequest(BaseModel):
+    """Request to establish or resume a session."""
+    device_id: str = Field(..., description="Stable device identifier")
+    surface: str = Field(..., description="Surface name (web_app, browser_extension, figma_v2)")
+    user_id: str = Field(default="anonymous", description="User identifier")
+
+
+class SessionHandshakeResponse(BaseModel):
+    """Response from session handshake."""
+    session_id: str = Field(..., description="Session identifier")
+    device_id: str = Field(..., description="Device identifier")
+    user_id: str = Field(..., description="User identifier")
+    surfaces: List[str] = Field(..., description="Surfaces that have accessed this session")
+    last_active_surface: str = Field(..., description="Most recently active surface")
+    started_on: str = Field(..., description="ISO 8601 timestamp of session creation")
+    last_active_on: str = Field(..., description="ISO 8601 timestamp of last activity")
+    is_new_session: bool = Field(..., description="True if this is a newly created session")
 
 
 # ============================================================================

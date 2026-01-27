@@ -5,8 +5,14 @@ set -e
 
 echo "Building Maestra Chrome Extension..."
 
-# Build TypeScript
-npx tsc --project tsconfig.json --outDir dist
+# Clean dist
+rm -rf dist
+mkdir -p dist
+
+# Build with TypeScript (ES modules)
+cd ..
+npx tsc --project extension/tsconfig.json --outDir extension/dist
+cd extension
 
 # Copy manifest
 cp manifest.json dist/

@@ -13,8 +13,8 @@ import logging
 import sys
 from pathlib import Path
 
-# Add conversation_hub to path
-conversation_hub_path = Path(__file__).parent.parent.parent.parent / "users/justin_harmon/8825-Jh/8825_core/conversation_hub"
+# Add conversation_hub to path (MIGRATED 2026-01-16)
+conversation_hub_path = Path(__file__).parent.parent.parent / "system/conversation_hub"
 if conversation_hub_path.exists():
     sys.path.insert(0, str(conversation_hub_path))
 

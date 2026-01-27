@@ -1,24 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
-import { MaestraCard, Header, PinsDrawer, ErrorBoundary, BreadcrumbPanel } from './components';
+import { MaestraCard, Header, PinsDrawer, ErrorBoundary, BreadcrumbPanel, DebugPanel } from './components';
 import { webAdapter } from './adapters';
 import { selectMode, type PageContext } from './modes';
 import { trackMessageSent, trackCaptureCreated, trackModeSelected } from './lib/analytics';
 import { breadcrumbTrail } from './lib/breadcrumbs';
+import { getOrCreateSessionId } from './lib/session';
 import type { Message, Context, CaptureResult } from './adapters/types';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
-
-function getOrCreateSessionId(): string {
-  // Check for shared session_id override (from query param or localStorage)
-  const params = new URLSearchParams(window.location.search);
-  const sharedSessionId = params.get('session_id') || localStorage.getItem('maestra_shared_session_id');
-  if (sharedSessionId) {
-    return sharedSessionId;
-  }
-  
-  // Fall back to default
-  return 'main';
-}
 
 function AppContent() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -121,7 +110,7 @@ function AppContent() {
 
     try {
       const startTime = performance.now();
-      const result = await webAdapter.capture(payload);
+      const result = await webAdapter.capture(payload, conversationId);
       const duration = performance.now() - startTime;
       
       breadcrumbTrail.addResult('Capture created', { 
@@ -140,7 +129,7 @@ function AppContent() {
     } finally {
       breadcrumbTrail.endExecution();
     }
-  }, [modeMatch]);
+  }, [modeMatch, conversationId]);
 
   const handleShare = useCallback((capture: CaptureResult) => {
     console.log('Sharing:', capture);
@@ -178,6 +167,8 @@ function AppContent() {
         isOpen={showBreadcrumbs}
         onToggle={() => setShowBreadcrumbs(!showBreadcrumbs)}
       />
+
+      <DebugPanel />
 
       {isPinsOpen && (
         <div

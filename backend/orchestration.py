@@ -10,11 +10,36 @@ import json
 import uuid
 import logging
 import asyncio
+import sys
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
+from dataclasses import dataclass
+
+# Add system/agents to path for agent_registry
+AGENTS_PATH = Path(__file__).parent.parent.parent.parent / "system" / "agents"
+sys.path.insert(0, str(AGENTS_PATH))
+
+from agent_registry import ASSISTANT, ANALYST
+from agent_telemetry import log_agent_event
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class OrchestratorRun:
+    """Tracks a single orchestrator run with agent identity."""
+    run_id: str
+    session_id: str
+    query: str
+    agent_id: str = "assistant"
+    auto_selected: bool = True
+    timestamp: str = ""
+    
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.utcnow().isoformat()
 
 
 class ExecutionSource(str, Enum):
@@ -61,6 +86,95 @@ class Orchestrator:
         self.sessions = {}  # session_id -> session_data
         self.conversation_feeds = {}  # session_id -> [turns]
         self.provenance_index = {}  # turn_id -> provenance_metadata
+        self.runs = {}  # run_id -> OrchestratorRun
+    
+    def select_agent(self, query: str) -> str:
+        """
+        Select agent based on query content.
+        
+        Phase 0 heuristic — intentionally simple and replaceable.
+        Uses basic string matching to route between Assistant and Analyst.
+        
+        Args:
+            query: User query string
+        
+        Returns:
+            agent_id: "assistant" or "analyst"
+        """
+        query_lower = query.lower()
+        
+        # Analyst triggers (queries requiring grounded answers)
+        analyst_triggers = [
+            "what did we",
+            "why did we",
+            "when did we",
+            "decision",
+            "decided",
+            "8825",
+            "do we have",
+            "what do we know"
+        ]
+        
+        for trigger in analyst_triggers:
+            if trigger in query_lower:
+                return "analyst"
+        
+        # Default to Assistant
+        return "assistant"
+    
+    def run(
+        self,
+        session_id: str,
+        query: str,
+        agent_id: Optional[str] = None
+    ) -> OrchestratorRun:
+        """
+        Create a tracked run with agent selection.
+        
+        Args:
+            session_id: Session identifier
+            query: User query
+            agent_id: Optional agent override (if None, auto-select)
+        
+        Returns:
+            OrchestratorRun with agent tracking
+        """
+        # Track whether agent was auto-selected BEFORE overwriting
+        auto_selected = agent_id is None
+        
+        # Auto-select if not provided
+        if agent_id is None:
+            agent_id = self.select_agent(query)
+        
+        # Create run object
+        run = OrchestratorRun(
+            run_id=str(uuid.uuid4()),
+            session_id=session_id,
+            query=query,
+            agent_id=agent_id,
+            auto_selected=auto_selected
+        )
+        
+        # Store run
+        self.runs[run.run_id] = run
+        
+        # Log agent selection
+        logger.info(
+            f"Orchestrator run created: run_id={run.run_id}, "
+            f"agent_id={agent_id}, auto_selected={auto_selected}"
+        )
+        
+        # Telemetry: agent_selected
+        log_agent_event(
+            event_type="agent_selected",
+            agent_id=agent_id,
+            query=query,
+            auto_selected=auto_selected,
+            session_id=session_id,
+            metadata={"run_id": run.run_id}
+        )
+        
+        return run
     
     async def route_parallel(
         self,

@@ -8,6 +8,8 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: ISODateTimeString;
+  sources?: string[];
+  mode?: string;
 }
 
 export interface Context {
@@ -38,5 +40,5 @@ export interface CaptureResult {
 export interface Adapter {
   sendMessage(conversationId: string, message: string, context?: Context, messages?: Message[]): Promise<Response>;
   prefetchContext(query: string): Promise<ContextResult>;
-  capture(payload: { content: string; context?: Context }): Promise<CaptureResult>;
+  capture(payload: { content: string; context?: Context }, sessionId: string): Promise<CaptureResult>;
 }

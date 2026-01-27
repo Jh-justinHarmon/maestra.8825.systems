@@ -65,13 +65,16 @@ from models import (
     SmartPDFExportRequest,
     SmartPDFExportResponse,
     SmartPDFImportRequest,
-    SmartPDFImportResponse
+    SmartPDFImportResponse,
+    SessionHandshakeRequest,
+    SessionHandshakeResponse
 )
 from advisor import ask_advisor
 from context import get_session_context
 from research import get_research_status
 from smart_pdf_handler import export_smart_pdf_handler, import_smart_pdf_handler
 from session_manager import register_session, get_session, has_capability, SessionCapabilities, SessionInfo
+from session_handler import get_or_create_session, update_session_activity
 from llm_router import get_configured_llm_provider, LLMConfigurationError
 from collaboration import (
     get_or_create_team, add_session_to_team, track_document,
@@ -646,6 +649,33 @@ async def health_check() -> HealthResponse:
     )
 
 
+@app.post("/api/maestra/session/handshake")
+async def session_handshake(request: SessionHandshakeRequest) -> SessionHandshakeResponse:
+    """
+    Establish or resume a session.
+    
+    If an active session exists for this device, returns it.
+    Otherwise, creates a new session.
+    Updates surfaces[] and last_active_surface.
+    """
+    try:
+        session_data = get_or_create_session(
+            device_id=request.device_id,
+            surface=request.surface,
+            user_id=request.user_id
+        )
+        
+        logger.info(f"[SESSION_HANDSHAKE] device_id={request.device_id}, surface={request.surface}, session_id={session_data['session_id']}, is_new={session_data['is_new_session']}")
+        
+        return SessionHandshakeResponse(**session_data)
+    except Exception as e:
+        logger.error(f"Session handshake error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Session handshake failed"
+        )
+
+
 @app.post("/api/maestra/advisor/ask")
 async def advisor_ask(request: AdvisorAskRequest) -> AdvisorAskResponse:
     """
@@ -750,6 +780,47 @@ async def context_summary_alias(session_id: str) -> ContextSummaryResponse:
 async def research_status_alias(job_id: str) -> ResearchStatusResponse:
     """Alias for /api/maestra/research/{job_id}"""
     return await research_status(job_id)
+
+
+@app.get("/api/version")
+async def get_version():
+    """Return deployed version info for verification"""
+    import subprocess
+    import hashlib
+    from pathlib import Path
+    
+    try:
+        # Get git commit hash
+        commit_hash = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).parent,
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except:
+        commit_hash = "unknown"
+    
+    # Get file checksums
+    files_to_check = [
+        "backend/advisor.py",
+        "backend/epistemic.py",
+        "backend/server.py",
+        "backend/routed_memory.py"
+    ]
+    
+    checksums = {}
+    for file_path in files_to_check:
+        full_path = Path(__file__).parent / file_path.replace("backend/", "")
+        if full_path.exists():
+            with open(full_path, 'rb') as f:
+                checksums[file_path] = hashlib.md5(f.read()).hexdigest()
+        else:
+            checksums[file_path] = "missing"
+    
+    return {
+        "commit_hash": commit_hash,
+        "checksums": checksums,
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 
 @app.put("/api/maestra/session/{session_id}/capabilities")

@@ -154,10 +154,15 @@ class CapabilityRouter:
         recommended = self.get_capabilities(pattern)
         
         # Filter to only available capabilities
-        available_set = set(available_capabilities)
+        # Convert strings to CapabilityType if needed
+        available_caps = [
+            CapabilityType(cap) if isinstance(cap, str) else cap
+            for cap in available_capabilities
+        ]
+        available_set = {cap.value if hasattr(cap, 'value') else cap for cap in available_caps}
         available_recommended = [
             cap for cap in recommended
-            if cap.value in available_set or cap.value in [c.value for c in available_capabilities]
+            if cap.value in available_set
         ]
         
         # If no recommended capabilities available, use all available

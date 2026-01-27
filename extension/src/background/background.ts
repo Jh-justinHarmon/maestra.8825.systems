@@ -4,6 +4,12 @@
  * Handles communication between content script and backend API.
  */
 
+import { getOrCreateDeviceId } from '../lib/deviceId';
+
+// Session state
+let currentSessionId: string | null = null;
+let deviceId: string | null = null;
+
 interface CapturePayload {
   schema_version: string;
   url: string;
@@ -35,6 +41,56 @@ async function getBackendUrl(): Promise<string> {
   const stored = await chrome.storage.local.get('maestra_backend_url');
   return stored.maestra_backend_url || BACKEND_URL;
 }
+
+/**
+ * Perform session handshake to get or create session
+ */
+async function performSessionHandshake(): Promise<string> {
+  // Return cached session if available
+  if (currentSessionId) {
+    return currentSessionId;
+  }
+  
+  // Get or create device ID
+  if (!deviceId) {
+    deviceId = await getOrCreateDeviceId();
+  }
+  
+  try {
+    const backendUrl = await getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/maestra/session/handshake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: deviceId,
+        surface: 'browser_extension',
+        user_id: 'anonymous'
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Session handshake failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const sessionId = data.session_id as string;
+    currentSessionId = sessionId;
+    
+    console.log(`[SESSION] device_id=${deviceId}, session_id=${sessionId}, surface=browser_extension, is_new=${data.is_new_session}`);
+    
+    return sessionId;
+  } catch (error) {
+    console.error('[SESSION] Handshake failed, using fallback session ID', error);
+    // Fallback to generated session ID
+    currentSessionId = `fallback_${Date.now()}`;
+    return currentSessionId;
+  }
+}
+
+// Perform handshake on extension startup
+performSessionHandshake().catch(err => {
+  console.error('[SESSION] Startup handshake failed:', err);
+});
 
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender: MessageSender, sendResponse: (response: unknown) => void) => {
@@ -78,16 +134,20 @@ async function handleCapture(payload: CapturePayload, sendResponse: (response: u
 
 async function handleSendMessage(payload: any, sendResponse: (response: any) => void) {
   try {
-    const { session_id, message, mode, client_context } = payload;
+    // Get session ID from handshake
+    const sessionId = await performSessionHandshake();
+    
+    const { message, mode, client_context } = payload;
     
     const apiBase = 'http://localhost:8825';
     console.log('[Maestra Extension] Using backend:', apiBase);
+    console.log(`[ADVISOR_CALL] session_id=${sessionId}, device_id=${deviceId}, surface=browser_extension`);
 
     const response = await fetch(`${apiBase}/api/maestra/advisor/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        session_id,
+        session_id: sessionId,
         message,
         mode,
         client_context,

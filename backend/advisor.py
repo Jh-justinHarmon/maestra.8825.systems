@@ -11,10 +11,18 @@ import time
 import uuid
 import logging
 import asyncio
+from pathlib import Path
 from typing import Optional, List, Tuple
 
 # Add parent paths for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add system/agents to path for agent_registry
+AGENTS_PATH = Path(__file__).parent.parent.parent.parent / "system" / "agents"
+sys.path.insert(0, str(AGENTS_PATH))
+
+from agent_registry import get_agent
+from agent_telemetry import log_agent_event
 
 from models import AdvisorAskRequest, AdvisorAskResponse, SourceReference
 from capability_router import route_query
@@ -29,7 +37,12 @@ from optimization import (
     performance_monitor
 )
 from llm_router import chat_completion
-from library_accessor import LibraryAccessor, ContextIndexAccessor, find_workspace_root
+from routed_memory import (
+    search_memory,
+    ensure_session_initialized,
+    get_session_router_state,
+    is_personal_enabled
+)
 from epistemic import (
     EpistemicState, GroundingSourceType, GroundingSource, GroundingResult,
     classify_query, verify_grounding, EpistemicResponse,
@@ -70,44 +83,25 @@ def _load_8825_knowledge() -> str:
     return _8825_KNOWLEDGE
 
 
-def search_8825_library(query: str, max_entries: int = 5) -> tuple[List[GroundingSource], bool]:
+def search_8825_library(query: str, max_entries: int = 5, session_id: str = None) -> tuple[List[GroundingSource], bool]:
     """
-    Search the 8825 library for relevant context.
+    Search the 8825 library for relevant context via Context Router.
+    
+    IMPORTANT: Uses router-enforced memory access. Session must be initialized.
     
     Returns: (grounding_sources, sources_found)
     - grounding_sources: List of GroundingSource objects with actual entries
     - sources_found: True if any sources were found, False if empty
     """
-    try:
-        workspace_root = find_workspace_root()
-        library = LibraryAccessor(workspace_root)
-        
-        # Search system library
-        entries = library.search(query, max_entries=max_entries)
-        
-        if not entries:
-            logger.info(f"Library search found no entries for: {query[:50]}")
-            return [], False
-        
-        # Convert to GroundingSource objects
-        sources = []
-        for entry in entries:
-            source = GroundingSource(
-                source_type=GroundingSourceType.LIBRARY,
-                identifier=entry.entry_id,
-                title=entry.title,
-                confidence=entry.confidence,
-                excerpt=entry.content[:200] if entry.content else None,
-                timestamp=entry.timestamp
-            )
-            sources.append(source)
-        
-        logger.info(f"Library search found {len(sources)} entries for: {query[:50]}")
-        return sources, True
+    if session_id is None:
+        logger.warning("search_8825_library called without session_id, using default")
+        session_id = "default_session"
     
-    except Exception as e:
-        logger.error(f"Library search error: {e}")
-        return [], False
+    # Ensure session has a router (creates default system-only if missing)
+    ensure_session_initialized(session_id)
+    
+    # Use router-enforced memory search
+    return search_memory(session_id, query, max_entries)
 
 
 async def get_context_from_brain(topic: str, focus: str = "global") -> Tuple[str, List[SourceReference]]:
@@ -258,6 +252,13 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         session = continuity_tracker.get_session_state(potential_id)
         if session.turns:
             # Return the loaded conversation
+            # Resolve agent identity
+            agent = get_agent("assistant")
+            agent_info = {
+                "id": agent.agent_id,
+                "display_name": agent.display_name
+            } if agent else {"id": "assistant", "display_name": "Assistant"}
+            
             return AdvisorAskResponse(
                 answer=f"Loaded conversation '{potential_id}' with {len(session.turns)} turns",
                 trace_id=trace_id,
@@ -272,13 +273,21 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                     )
                 ],
                 conversation_id=potential_id,
-                turns=[t.to_dict() for t in session.turns]
+                turns=[t.to_dict() for t in session.turns],
+                agent=agent_info
             )
         # Check if it's a library entry ID (16 hex chars)
         elif re.match(r'^[a-f0-9]{16}$', potential_id.lower()):
             # Already handled above via library_context, continue to normal processing
             pass
         else:
+            # Resolve agent identity
+            agent = get_agent("assistant")
+            agent_info = {
+                "id": agent.agent_id,
+                "display_name": agent.display_name
+            } if agent else {"id": "assistant", "display_name": "Assistant"}
+            
             return AdvisorAskResponse(
                 answer=f"Conversation '{potential_id}' not found or is empty",
                 trace_id=trace_id,
@@ -286,7 +295,8 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 mode="quick",
                 sources=[],
                 conversation_id=potential_id,
-                turns=[]
+                turns=[],
+                agent=agent_info
             )
     
     all_sources: List[SourceReference] = []
@@ -403,8 +413,8 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 library_context += f"\n\n--- MEMORY CONTEXT ---\n{chain_context}"
                 logger.info(f"Added chain context ({len(chain_context)} chars) to prompt")
     
-    # Gather grounding sources from library
-    library_sources, library_found = search_8825_library(question)
+    # Gather grounding sources from library (router-enforced)
+    library_sources, library_found = search_8825_library(question, session_id=request.session_id)
     
     # Classify query to determine if grounding is required
     query_type = classify_query(question)
@@ -418,6 +428,7 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     
     # If grounding is required but no sources found, refuse to answer
     if grounding_result.requires_grounding and not library_found:
+        logger.critical(f"🔴 REFUSAL_TRIGGERED | query={question[:50]} | requires_grounding={grounding_result.requires_grounding} | library_found={library_found} | trace_id={trace_id}")
         logger.warning(f"Query requires grounding but no sources found: {question[:50]}")
         
         # Return REFUSED response
@@ -431,6 +442,25 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
             ]
         )
         
+        # Resolve agent identity for refused response
+        agent_id = "analyst"  # Refusals come from Analyst
+        agent = get_agent(agent_id)
+        agent_info = {
+            "id": agent.agent_id,
+            "display_name": agent.display_name
+        } if agent else {"id": "analyst", "display_name": "Analyst"}
+        
+        # Telemetry: agent_refused
+        log_agent_event(
+            event_type="agent_refused",
+            agent_id=agent_id,
+            query=question,
+            auto_selected=True,  # Refusals are always from auto-selected Analyst
+            session_id=request.session_id,
+            metadata={"trace_id": trace_id, "epistemic_state": "REFUSED"}
+        )
+        
+        logger.critical(f"🔴 REFUSAL_RETURNING | trace_id={trace_id} | epistemic_state=REFUSED | about_to_return=True")
         return AdvisorAskResponse(
             answer=refused_response.answer,
             trace_id=trace_id,
@@ -439,8 +469,11 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
             sources=[],
             epistemic_state=refused_response.epistemic_state.value,
             grounding_sources=refused_response.grounding_sources,
-            confidence=refused_response.confidence
+            confidence=refused_response.confidence,
+            agent=agent_info
         )
+    
+    logger.critical(f"🔴 REFUSAL_BYPASSED | trace_id={trace_id} | execution_continued_past_refusal_block=True | THIS_SHOULD_NOT_HAPPEN")
     
     # Add library sources to all_sources
     if library_sources:
@@ -469,13 +502,43 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     else:
         epistemic_state = EpistemicState.REFUSED
     
-    # Build base system prompt
+    # Check actual 8825 system availability
+    system_status = {
+        "library_available": library_found,
+        "library_entries": len(library_sources) if library_sources else 0,
+        "jh_brain": "unknown",  # From health check
+        "memory_hub": "unknown",
+        "deep_research": "unknown"
+    }
+    
+    # Build base system prompt with anti-hallucination constraints AND honest availability reporting
     base_system_prompt = (
-        "You are Maestra, the AI assistant for 8825 - a platform that amplifies human operators with AI.\n\n"
-        "IMPORTANT: If the user provides a PAGE SNAPSHOT in the request (domain/url/title/visible text/selection), "
-        "treat it as an authoritative description of what they are seeing. Use it to answer questions like "
-        "'what website am I on' or 'can you see what I am seeing' without guessing. "
-        "If no snapshot is provided, say you don't have enough context and ask 1-2 focused questions.\n\n"
+        "You are Maestra, the intelligence layer for the 8825 browser extension.\n\n"
+        "SURFACE ARCHITECTURE:\n"
+        "- This is a thin-client browser extension with NO local intelligence\n"
+        "- You (Maestra) are the brain - all decisions, memory, and tools live in your backend\n"
+        "- The extension only provides UI and basic page context\n\n"
+        "OPERATING CONSTRAINTS:\n"
+        "- PARTIAL CONTEXT: The extension provides limited context (URL, title, domain, selection)\n"
+        "- LOSSY INFORMATION: Not all page details are captured - work with what's provided\n"
+        "- NO GUESSING: If you don't have the required context, explicitly state what you need\n"
+        "- ACKNOWLEDGE LIMITATIONS: Be clear about what you can and cannot see\n\n"
+        f"CURRENT 8825 SYSTEM STATUS:\n"
+        f"- Library: {'✓ Available' if system_status['library_available'] else '✗ Not available'} "
+        f"({system_status['library_entries']} entries found)\n"
+        f"- Jh Brain: {system_status['jh_brain']}\n"
+        f"- Memory Hub: {system_status['memory_hub']}\n"
+        f"- Deep Research: {system_status['deep_research']}\n\n"
+        "CRITICAL: If the user asks about 8825 systems, projects, or knowledge and the library shows "
+        "'Not available' or 0 entries, you MUST say: 'I'm not currently connected to the 8825 library. "
+        "I cannot access project history, decisions, or knowledge without it.'\n"
+        "DO NOT pretend to have access to systems that show 'unknown' or 'Not available'.\n\n"
+        "RESPONSE GUIDELINES:\n"
+        "- If the user provides a PAGE SNAPSHOT (domain/url/title/selection), treat it as authoritative\n"
+        "- If NO snapshot is provided, say: 'I cannot answer this question because I don't have the required context. "
+        "To help you, I would need: [specific items]'\n"
+        "- Never make up information about the page or user's context\n"
+        "- If you need more context, ask 1-2 focused questions\n\n"
         "LIBRARY ENTRIES: If the user references an Entry ID (16-character hex string like '5ce9e4d4f0f23d90'), "
         "the content from that library entry will be provided below. Use it to answer their question with full context."
     )
@@ -556,6 +619,30 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         for source in library_sources
     ]
     
+    # Resolve agent identity for response
+    # Default to assistant if agent selection not yet integrated
+    agent_id = "assistant"  # Will be replaced with orchestrator.run() integration
+    agent = get_agent(agent_id)
+    agent_info = {
+        "id": agent.agent_id,
+        "display_name": agent.display_name
+    } if agent else {"id": "assistant", "display_name": "Assistant"}
+    
+    # Telemetry: agent_answered
+    log_agent_event(
+        event_type="agent_answered",
+        agent_id=agent_id,
+        query=question,
+        auto_selected=True,  # Will be replaced with actual auto_selected value
+        session_id=request.session_id,
+        metadata={
+            "trace_id": trace_id,
+            "epistemic_state": epistemic_state.value,
+            "sources_count": len(all_sources),
+            "processing_time_ms": processing_time
+        }
+    )
+    
     return AdvisorAskResponse(
         answer=answer,
         session_id=request.session_id,
@@ -566,7 +653,8 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         processing_time_ms=processing_time,
         epistemic_state=epistemic_state.value,
         grounding_sources=grounding_sources_response,
-        confidence=grounding_result.confidence
+        confidence=grounding_result.confidence,
+        agent=agent_info
     )
 
 
@@ -596,6 +684,13 @@ async def process_deep_question(request: AdvisorAskRequest) -> AdvisorAskRespons
     
     processing_time = int((time.time() - start_time) * 1000)
     
+    # Resolve agent identity
+    agent = get_agent("assistant")
+    agent_info = {
+        "id": agent.agent_id,
+        "display_name": agent.display_name
+    } if agent else {"id": "assistant", "display_name": "Assistant"}
+    
     return AdvisorAskResponse(
         answer=f"Deep research job created. Poll /api/maestra/research/{job_id} for status.",
         session_id=request.session_id,
@@ -603,7 +698,8 @@ async def process_deep_question(request: AdvisorAskRequest) -> AdvisorAskRespons
         sources=[],
         trace_id=trace_id,
         mode="deep",
-        processing_time_ms=processing_time
+        processing_time_ms=processing_time,
+        agent=agent_info
     )
 
 

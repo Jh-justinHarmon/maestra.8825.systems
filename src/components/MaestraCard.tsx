@@ -246,8 +246,8 @@ ${pageContext.visibleText.slice(0, 2000)}...
               <span className="text-xs opacity-60 mt-2 block">
                 {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
-              {message.role === 'assistant' && (message as any).sources && (
-                <SourcesPanel sources={(message as any).sources} className="mt-2" />
+              {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+                <SourcesPanel sources={message.sources} className="mt-2" />
               )}
             </div>
           </div>

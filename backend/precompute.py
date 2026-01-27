@@ -22,14 +22,14 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-# Add root finder to path - find 8825_core in workspace
+# Add root finder to path - find 8825/system in workspace (MIGRATED 2026-01-16)
 workspace_root = Path(__file__).parent.parent.parent.parent
-# Look for 8825_core in users/justin_harmon/8825-Jh/
-core_root = workspace_root / "users" / "justin_harmon" / "8825-Jh" / "8825_core"
+# New location: 8825/system
+core_root = workspace_root / "8825" / "system"
 
 if not core_root.exists():
-    # Fallback: look in workspace root
-    core_root = workspace_root / "8825_core"
+    # Fallback: try old location
+    core_root = workspace_root / "users" / "justin_harmon" / "8825-Jh" / "8825_core"
 
 sys.path.insert(0, str(core_root / "system"))
 sys.path.insert(0, str(core_root))
