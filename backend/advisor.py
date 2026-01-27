@@ -186,7 +186,8 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
             epistemic_state=EpistemicState.REFUSED,
             confidence=0.0,
             trace_id=trace_id,
-            session_id=request.session_id
+            session_id=request.session_id,
+            mode="quick"
         )
         
         logger.critical(f"🔴 REFUSAL_RETURNING | trace_id={trace_id} | epistemic_state=REFUSED")
@@ -210,7 +211,8 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
         epistemic_state=EpistemicState.UNGROUNDED,
         confidence=0.7,
         trace_id=trace_id,
-        session_id=request.session_id
+        session_id=request.session_id,
+        mode="quick"
     )
 
 # MCP client paths - these would be replaced with actual MCP calls in production
