@@ -27,11 +27,8 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
-# Add routing module to path
-ROUTING_PATH = Path(__file__).parent.parent.parent.parent / "system" / "routing"
-sys.path.insert(0, str(ROUTING_PATH))
-
-from context_router import (
+# Import from system.routing (PYTHONPATH includes /app/system)
+from routing.context_router import (
     ContextRouterState,
     RouterMode,
     RouterIssuer,
@@ -43,8 +40,8 @@ from context_router import (
     RouterMissingError,
     RouterSecurityError
 )
-from memory_gate import MemoryGate, get_memory_gate
-from maestra_memory import MaestraMemory, MaestraMemoryError
+from gates.memory_gate import MemoryGate, get_memory_gate
+from backend_8825.maestra_memory import MaestraMemory, MaestraMemoryError
 
 # Also import epistemic types for grounding sources
 from epistemic import GroundingSource, GroundingSourceType
