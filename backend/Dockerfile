@@ -8,15 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy system dependencies (from repo root context)
+COPY system ./system
+
 # Copy backend requirements and install
-COPY requirements.txt .
+COPY apps/maestra.8825.systems/backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy system dependencies from repo root
-COPY ../../system ./system
-
 # Copy backend application code
-COPY . .
+COPY apps/maestra.8825.systems/backend/ .
 
 # Add system to PYTHONPATH
 ENV PYTHONPATH="/app:/app/system:${PYTHONPATH}"
