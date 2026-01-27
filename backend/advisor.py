@@ -401,8 +401,12 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     if has_capability(request.session_id, "open_loops"):
         session_capabilities.append("local_companion")
     
-    routing = route_query(question, session_capabilities)
-    logger.info(f"Query routed to: {routing['primary_capability']} (pattern: {routing['pattern']})")
+    # Skip routing in minimal mode
+    if not MINIMAL_MODE:
+        routing = route_query(question, session_capabilities)
+        logger.info(f"Query routed to: {routing['primary_capability']} (pattern: {routing['pattern']})")
+    else:
+        logger.info("Minimal mode - skipping query routing")
 
     # Client-provided context (e.g., from extension/local companion) is the primary context source in prod.
     client_context_text = ""
