@@ -131,6 +131,88 @@ from context_injection import inject_context_into_prompt
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# MINIMAL MODE ADVISOR (Bypasses all system dependencies)
+# =============================================================================
+
+async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorAskResponse:
+    """
+    Minimal advisor that only handles:
+    1. Query classification
+    2. Memory search (always empty in minimal mode)
+    3. Grounding verification
+    4. Refusal if grounding required
+    5. LLM answer if allowed
+    
+    No routing, no MCP chains, no session continuity.
+    """
+    question = request.question
+    trace_id = str(uuid.uuid4())[:8]
+    
+    logger.info(f"[MINIMAL MODE] Processing question: {question[:50]}...")
+    
+    # Step 1: Classify query
+    query_type = classify_query(question)
+    logger.info(f"[MINIMAL MODE] Query classified as: {query_type}")
+    
+    # Step 2: Search memory (always returns empty in minimal mode)
+    grounding_sources, library_found = search_memory(
+        session_id=request.session_id,
+        query=question,
+        max_entries=5
+    )
+    logger.info(f"[MINIMAL MODE] Memory search returned {len(grounding_sources)} sources, library_found={library_found}")
+    
+    # Step 3: Verify grounding
+    grounding_result = verify_grounding(
+        query=question,
+        sources=grounding_sources,
+        query_type=query_type
+    )
+    logger.info(f"[MINIMAL MODE] Grounding result: requires_grounding={grounding_result.requires_grounding}, library_found={library_found}")
+    
+    # Step 4: REFUSAL LOGIC (THE CRITICAL TEST)
+    if grounding_result.requires_grounding and not library_found:
+        logger.critical(f"🔴 REFUSAL_TRIGGERED | query={question[:50]} | trace_id={trace_id} | requires_grounding=True | library_found=False")
+        
+        response = AdvisorAskResponse(
+            answer=(
+                "I need access to your personal memory to answer questions about your specific context, "
+                "but I don't have that access right now. This is by design - I only access your memory "
+                "when explicitly authorized.\n\n"
+                "In minimal mode, personal memory is not available."
+            ),
+            sources=[],
+            epistemic_state=EpistemicState.REFUSED,
+            confidence=0.0,
+            trace_id=trace_id,
+            session_id=request.session_id
+        )
+        
+        logger.critical(f"🔴 REFUSAL_RETURNING | trace_id={trace_id} | epistemic_state=REFUSED")
+        return response
+    
+    logger.critical(f"🔴 REFUSAL_BYPASSED | trace_id={trace_id} | This should not happen for memory-required queries!")
+    
+    # Step 5: Generate answer (if we got here, query doesn't require grounding)
+    logger.info(f"[MINIMAL MODE] Query does not require grounding, generating answer")
+    
+    messages = [
+        {"role": "system", "content": "You are Maestra, a helpful AI assistant. Be concise and direct."},
+        {"role": "user", "content": question}
+    ]
+    
+    answer = await chat_completion(messages=messages)
+    
+    return AdvisorAskResponse(
+        answer=answer,
+        sources=[],
+        epistemic_state=EpistemicState.UNGROUNDED,
+        confidence=0.7,
+        trace_id=trace_id,
+        session_id=request.session_id
+    )
+
 # MCP client paths - these would be replaced with actual MCP calls in production
 JH_BRAIN_URL = os.getenv("JH_BRAIN_URL", "http://localhost:8825")
 MEMORY_HUB_URL = os.getenv("MEMORY_HUB_URL", "http://localhost:8826")
@@ -814,4 +896,8 @@ async def ask_advisor(request: AdvisorAskRequest) -> AdvisorAskResponse:
     if request.mode == "deep":
         return await process_deep_question(request)
     else:
-        return await process_quick_question(request)
+        # Use minimal advisor in minimal mode
+        if MINIMAL_MODE:
+            return await minimal_process_quick_question(request)
+        else:
+            return await process_quick_question(request)
