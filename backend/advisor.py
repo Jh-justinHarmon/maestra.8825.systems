@@ -70,11 +70,11 @@ if MINIMAL_MODE:
     
     def get_context_for_next_turn(session_id: str, **kwargs):
         """No context in minimal mode."""
-        return ""
+        return {"recent_turns": [], "summary": "", "context": ""}
     
     def get_session_summary(session_id: str, **kwargs):
         """No summary in minimal mode."""
-        return ""
+        return {"summary": "", "turn_count": 0}
     
     def accumulate_context(session_id: str, context: str, **kwargs):
         """No-op in minimal mode."""
