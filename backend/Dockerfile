@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend application code
 COPY apps/maestra.8825.systems/backend/ .
 
-# Add system to PYTHONPATH
-ENV PYTHONPATH="/app:/app/system:${PYTHONPATH}"
+# Add system and agents to PYTHONPATH
+ENV PYTHONPATH="/app:/app/system:/app/system/agents:${PYTHONPATH}"
 
 # Expose port
 EXPOSE 8000
