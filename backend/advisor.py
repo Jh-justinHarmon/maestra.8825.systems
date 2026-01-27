@@ -167,7 +167,7 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
     grounding_result = verify_grounding(
         query=question,
         sources=grounding_sources,
-        query_type=query_type
+        trace_id=trace_id
     )
     logger.info(f"[MINIMAL MODE] Grounding result: requires_grounding={grounding_result.requires_grounding}, library_found={library_found}")
     
