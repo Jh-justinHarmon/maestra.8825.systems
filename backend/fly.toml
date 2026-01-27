@@ -8,6 +8,7 @@ primary_region = 'dfw'
 
 [build]
   dockerfile = 'Dockerfile'
+  ignorefile = '.dockerignore'
 
 [env]
   PYTHONUNBUFFERED = 'true'

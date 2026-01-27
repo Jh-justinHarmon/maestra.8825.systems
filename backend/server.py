@@ -93,6 +93,55 @@ from conversation_save_service import save_conversation_from_maestra, save_conve
 from startup_verification import verify_startup, crash_if_startup_fails
 from epistemic import EpistemicState
 
+# =============================================================================
+# STARTUP VALIDATION - HARD FAIL ON MISSING DEPENDENCIES
+# =============================================================================
+
+def validate_system_dependencies():
+    """
+    Validate critical system dependencies on startup.
+    Crashes container if any are missing - prevents ghost-success deploys.
+    """
+    import os
+    from pathlib import Path
+    
+    logger.info("🔍 Validating system dependencies...")
+    
+    # Check system/ directory exists
+    system_dir = Path("/app/system")
+    if not system_dir.exists():
+        raise RuntimeError(
+            f"❌ FATAL: system/ directory not found at {system_dir}. "
+            "Deployment failed - check Dockerfile COPY paths."
+        )
+    logger.info(f"✅ system/ directory found at {system_dir}")
+    
+    # Check critical imports
+    critical_imports = [
+        ("routing.context_router", "Context Router"),
+        ("gates.memory_gate", "Memory Gate"),
+        ("backend_8825.maestra_memory", "Maestra Memory"),
+    ]
+    
+    for module_path, module_name in critical_imports:
+        try:
+            __import__(module_path)
+            logger.info(f"✅ {module_name} import successful")
+        except ImportError as e:
+            raise RuntimeError(
+                f"❌ FATAL: Cannot import {module_name} ({module_path}). "
+                f"Error: {e}. Deployment failed - check PYTHONPATH and system/ structure."
+            )
+    
+    logger.info("✅ All system dependencies validated")
+
+# Run validation on import
+try:
+    validate_system_dependencies()
+except RuntimeError as e:
+    logger.critical(str(e))
+    raise
+
 # DLI Pre-Computation Integration
 try:
     from precompute import router as precompute_router

@@ -12,14 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy system dependencies from repo root
-COPY ../../system ./system
-
 # Copy backend application code
 COPY . .
-
-# Add system to PYTHONPATH
-ENV PYTHONPATH="/app:/app/system:${PYTHONPATH}"
 
 # Expose port
 EXPOSE 8000
