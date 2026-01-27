@@ -21,6 +21,9 @@ COPY apps/maestra.8825.systems/backend/ .
 # Add system and agents to PYTHONPATH
 ENV PYTHONPATH="/app:/app/system:/app/system/agents:${PYTHONPATH}"
 
+# Enable minimal mode (no system dependencies)
+ENV MAESTRA_MINIMAL_MODE=true
+
 # Expose port
 EXPOSE 8000
 
