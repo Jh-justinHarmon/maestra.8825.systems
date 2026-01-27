@@ -93,6 +93,13 @@ from conversation_save_service import save_conversation_from_maestra, save_conve
 from startup_verification import verify_startup, crash_if_startup_fails
 from epistemic import EpistemicState
 
+# Setup logging first (needed for validation)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # =============================================================================
 # STARTUP VALIDATION - HARD FAIL ON MISSING DEPENDENCIES
 # =============================================================================
@@ -155,15 +162,9 @@ except ImportError as e:
     HAS_PRECOMPUTE = False
     precompute_router = None
 
-# Setup logging
 # LLM call tracking (in-memory; resets on restart)
 llm_call_counter = defaultdict(int)  # date -> count
 daily_quota = int(os.getenv("DAILY_LLM_QUOTA", "10000"))  # Default 10k calls/day
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # Memory Assimilator integration (used by Capture)
 try:
