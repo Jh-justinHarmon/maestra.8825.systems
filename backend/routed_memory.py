@@ -41,7 +41,7 @@ from routing.context_router import (
     RouterSecurityError
 )
 from routing.memory_gate import MemoryGate, get_memory_gate
-from backend_8825.maestra_memory import MaestraMemory, MaestraMemoryError
+from routing.maestra_memory import MaestraMemory, MaestraMemoryError
 
 # Also import epistemic types for grounding sources
 from epistemic import GroundingSource, GroundingSourceType
