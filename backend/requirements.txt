@@ -8,3 +8,4 @@ cryptography>=44.0.0
 requests>=2.31.0
 asyncpg>=0.29.0
 prometheus-client>=0.19.0
+pyyaml
