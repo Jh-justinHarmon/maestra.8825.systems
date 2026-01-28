@@ -126,8 +126,8 @@ def validate_system_dependencies():
     # Check critical imports
     critical_imports = [
         ("routing.context_router", "Context Router"),
-        ("gates.memory_gate", "Memory Gate"),
-        ("backend_8825.maestra_memory", "Maestra Memory"),
+        ("routing.memory_gate", "Memory Gate"),
+        ("routing.maestra_memory", "Maestra Memory"),
     ]
     
     for module_path, module_name in critical_imports:
