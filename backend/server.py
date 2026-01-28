@@ -151,7 +151,11 @@ if not MINIMAL_MODE:
         logger.critical(str(e))
         raise
 else:
-    logger.info("🟢 MAESTRA_MINIMAL_MODE enabled - skipping system dependency validation")
+    logger.warning(
+        "⚠️ MAESTRA_MINIMAL_MODE=true - EMERGENCY MODE ACTIVE. "
+        "System dependency validation SKIPPED. This mode should ONLY be used for debugging. "
+        "Full system features are DISABLED. Set MAESTRA_MINIMAL_MODE=false for production."
+    )
 
 # DLI Pre-Computation Integration
 try:

@@ -21,8 +21,9 @@ COPY apps/maestra.8825.systems/backend/ .
 # Add system and agents to PYTHONPATH
 ENV PYTHONPATH="/app:/app/system:/app/system/agents:${PYTHONPATH}"
 
-# Minimal mode flag (set to true to bypass system dependencies)
-# Keep minimal code paths available but run in full mode
+# FULL MODE (production default)
+# MAESTRA_MINIMAL_MODE=true is EMERGENCY ONLY - bypasses system dependencies
+# Never deploy with minimal mode unless actively debugging boot failures
 ENV MAESTRA_MINIMAL_MODE=false
 
 # Expose port

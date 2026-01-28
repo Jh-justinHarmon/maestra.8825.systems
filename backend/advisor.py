@@ -24,7 +24,7 @@ MINIMAL_MODE = os.getenv("MAESTRA_MINIMAL_MODE", "false").lower() == "true"
 
 if MINIMAL_MODE:
     logger = logging.getLogger(__name__)
-    logger.info("🟢 MAESTRA_MINIMAL_MODE enabled - using stubs")
+    logger.warning("⚠️ MAESTRA_MINIMAL_MODE=true - EMERGENCY MODE. Using stubs instead of real system.")
     
     # Use stubs instead of system imports
     from stubs.stub_agent_registry import get_agent
@@ -86,7 +86,7 @@ if MINIMAL_MODE:
 
 else:
     logger = logging.getLogger(__name__)
-    logger.info("🔴 MAESTRA_MINIMAL_MODE disabled - using full system")
+    logger.info("✅ FULL MODE - using real system dependencies")
     
     # Add parent paths for imports
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
