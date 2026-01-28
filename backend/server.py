@@ -22,6 +22,22 @@ import os
 import sys
 from collections import defaultdict
 
+# =============================================================================
+# TRACK 1 STEP 4: FAIL FAST IF MINIMAL MODE IN CI/PRODUCTION
+# =============================================================================
+# This check runs BEFORE any other imports to catch misconfiguration early.
+# Minimal mode is EMERGENCY ONLY - never for CI or production.
+
+_ci_env = os.getenv("CI", "").lower() == "true" or os.getenv("GITHUB_ACTIONS", "").lower() == "true"
+_minimal_mode = os.getenv("MAESTRA_MINIMAL_MODE", "false").lower() == "true"
+
+if _ci_env and _minimal_mode:
+    raise RuntimeError(
+        "❌ FATAL: MAESTRA_MINIMAL_MODE=true detected in CI environment. "
+        "This mode is EMERGENCY ONLY and must NEVER run in CI. "
+        "Set MAESTRA_MINIMAL_MODE=false or remove the variable."
+    )
+
 # Prometheus metrics
 try:
     from prometheus_client import Counter, Histogram, CONTENT_TYPE_LATEST, generate_latest

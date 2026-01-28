@@ -394,6 +394,10 @@ export const webAdapter: Adapter = {
           timestamp: new Date().toISOString(),
           sources: data.sources || [],
           mode: data.mode,
+          // TRACK 2: Truth-on-surface fields
+          system_mode: data.system_mode,
+          authority: data.authority,
+          agent: data.agent,
         },
       };
     } catch (error) {

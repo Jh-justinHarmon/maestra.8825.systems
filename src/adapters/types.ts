@@ -10,6 +10,13 @@ export interface Message {
   timestamp: ISODateTimeString;
   sources?: string[];
   mode?: string;
+  // TRACK 2: Truth-on-surface fields
+  system_mode?: 'full' | 'minimal';
+  authority?: 'system' | 'memory' | 'none';
+  agent?: {
+    id: string;
+    display_name: string;
+  };
 }
 
 export interface Context {

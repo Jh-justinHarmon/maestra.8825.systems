@@ -187,7 +187,9 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
             confidence=0.0,
             trace_id=trace_id,
             session_id=request.session_id,
-            mode="quick"
+            mode="quick",
+            system_mode="minimal",
+            authority="none"
         )
         
         logger.critical(f"🔴 REFUSAL_RETURNING | trace_id={trace_id} | epistemic_state=REFUSED")
@@ -212,7 +214,9 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
         confidence=0.7,
         trace_id=trace_id,
         session_id=request.session_id,
-        mode="quick"
+        mode="quick",
+        system_mode="minimal",
+        authority="none"
     )
 
 # MCP client paths - these would be replaced with actual MCP calls in production
@@ -437,7 +441,9 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 ],
                 conversation_id=potential_id,
                 turns=[t.to_dict() for t in session.turns],
-                agent=agent_info
+                agent=agent_info,
+                system_mode="full",
+                authority="memory"
             )
         # Check if it's a library entry ID (16 hex chars)
         elif re.match(r'^[a-f0-9]{16}$', potential_id.lower()):
@@ -459,7 +465,9 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 sources=[],
                 conversation_id=potential_id,
                 turns=[],
-                agent=agent_info
+                agent=agent_info,
+                system_mode="full",
+                authority="none"
             )
     
     all_sources: List[SourceReference] = []
@@ -637,7 +645,9 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
             epistemic_state=refused_response.epistemic_state.value,
             grounding_sources=refused_response.grounding_sources,
             confidence=refused_response.confidence,
-            agent=agent_info
+            agent=agent_info,
+            system_mode="full",
+            authority="system"
         )
     
     logger.critical(f"🔴 REFUSAL_BYPASSED | trace_id={trace_id} | execution_continued_past_refusal_block=True | THIS_SHOULD_NOT_HAPPEN")
@@ -810,6 +820,10 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         }
     )
     
+    # Determine authority based on whether we found library sources
+    has_library_sources = any(s.type == "library" for s in all_sources)
+    authority = "memory" if has_library_sources else "system"
+    
     return AdvisorAskResponse(
         answer=answer,
         session_id=request.session_id,
@@ -821,7 +835,9 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         epistemic_state=epistemic_state.value,
         grounding_sources=grounding_sources_response,
         confidence=grounding_result.confidence,
-        agent=agent_info
+        agent=agent_info,
+        system_mode="full",
+        authority=authority
     )
 
 
@@ -866,7 +882,9 @@ async def process_deep_question(request: AdvisorAskRequest) -> AdvisorAskRespons
         trace_id=trace_id,
         mode="deep",
         processing_time_ms=processing_time,
-        agent=agent_info
+        agent=agent_info,
+        system_mode="full",
+        authority="system"
     )
 
 

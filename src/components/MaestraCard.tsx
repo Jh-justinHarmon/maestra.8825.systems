@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Paperclip, Camera, Settings, X, ArrowDown, Target } from 'lucide-react';
 import { MessageRenderer } from './MessageRenderer';
+import { MessageMetadata } from './MessageMetadata';
 import { SourcesPanel } from './SourcesPanel';
 
 // Type declaration for ImageCapture API (not in default TS lib)
@@ -241,13 +242,16 @@ ${pageContext.visibleText.slice(0, 2000)}...
               {message.role === 'user' ? (
                 <p className="whitespace-pre-wrap">{message.content}</p>
               ) : (
-                <MessageRenderer content={message.content} />
+                <>
+                  <MessageRenderer content={message.content} />
+                  <MessageMetadata agent={message.agent} authority={message.authority} />
+                </>
               )}
               <span className="text-xs opacity-60 mt-2 block">
                 {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
               {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-                <SourcesPanel sources={message.sources} className="mt-2" />
+                <SourcesPanel sources={message.sources as any} className="mt-2" />
               )}
             </div>
           </div>

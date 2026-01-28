@@ -16,6 +16,11 @@ function AppContent() {
   const [isPinsOpen, setIsPinsOpen] = useState(false);
   const [showBreadcrumbs, setShowBreadcrumbs] = useState(false);
   const conversationId = getOrCreateSessionId();
+  
+  // TRACK 2: Track latest system_mode from backend responses
+  const latestSystemMode = messages
+    .filter(m => m.role === 'assistant' && m.system_mode)
+    .slice(-1)[0]?.system_mode;
 
   // Detect current page context and select mode
   const pageContext: PageContext = {
@@ -142,6 +147,7 @@ function AppContent() {
         pinsCount={pins.length}
         modeId={modeMatch.mode.id}
         modeConfidence={modeMatch.confidence}
+        systemMode={latestSystemMode}
       />
 
       <main className={`flex-1 p-6 lg:px-[250px] overflow-hidden ${showBreadcrumbs ? 'pb-80' : ''}`}>

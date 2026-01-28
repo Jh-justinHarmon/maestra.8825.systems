@@ -53,6 +53,9 @@ class AdvisorAskResponse(BaseModel):
     conversation_id: Optional[str] = Field(None, description="Loaded conversation ID (if loading a conversation)")
     turns: Optional[List[dict]] = Field(None, description="Conversation turns (if loading a conversation)")
     agent: Optional[dict] = Field(None, description="Agent that generated this response")
+    # TRACK 2: Truth-on-surface fields (mandatory for transparency)
+    system_mode: Literal["full", "minimal"] = Field(..., description="System mode: full (real system) or minimal (emergency stubs)")
+    authority: Literal["system", "memory", "none"] = Field(..., description="Source of authority: system routing, memory lookup, or none")
 
 
 # ============================================================================

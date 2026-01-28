@@ -1,15 +1,17 @@
- import { Pin, Hexagon, Settings } from 'lucide-react';
+import { Pin, Hexagon, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { ConnectionStatus } from './ConnectionStatus';
+import { SystemModeBadge } from './SystemModeBadge';
 
 interface HeaderProps {
   onTogglePins: () => void;
   pinsCount: number;
   modeId?: string;
   modeConfidence?: number;
+  systemMode?: 'full' | 'minimal';
 }
 
-export function Header({ onTogglePins, pinsCount, modeId, modeConfidence }: HeaderProps) {
+export function Header({ onTogglePins, pinsCount, modeId, modeConfidence, systemMode }: HeaderProps) {
   const [showApiDebug, setShowApiDebug] = useState(false);
   const [apiEndpoint, setApiEndpoint] = useState(
     localStorage.getItem('maestra_api_override') || ''
@@ -57,6 +59,7 @@ export function Header({ onTogglePins, pinsCount, modeId, modeConfidence }: Head
       </div>
 
       <div className="flex items-center gap-3">
+        <SystemModeBadge mode={systemMode} />
         <ConnectionStatus className="text-sm" />
         <button
           onClick={() => setShowApiDebug(!showApiDebug)}
