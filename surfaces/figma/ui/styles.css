@@ -1,0 +1,300 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 12px;
+  color: #f4f4f5;
+  background: #27272a;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #3f3f46;
+  flex-shrink: 0;
+  background: #27272a;
+}
+
+header h1 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* Thread Info - Memory Boundary Indicators */
+.thread-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.thread-name {
+  color: #f4f4f5;
+  font-weight: 500;
+  padding: 2px 6px;
+  background: #3f3f46;
+  border-radius: 4px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-indicator {
+  color: #a1a1aa;
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.memory-indicator::before {
+  content: '•';
+  margin-right: 4px;
+}
+
+#messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  background: #27272a;
+}
+
+#messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 85%;
+}
+
+.message.user {
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.message.maestra {
+  align-items: flex-start;
+  margin-right: auto;
+}
+
+.message-content {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.message.user .message-content {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.message.maestra .message-content {
+  background: #3f3f46;
+  color: #f4f4f5;
+}
+
+footer {
+  padding: 16px;
+  border-top: 1px solid #3f3f46;
+  flex-shrink: 0;
+  background: #27272a;
+}
+
+.input-container {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+#message-input {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 12px;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  background: #3f3f46;
+  color: #f4f4f5;
+  resize: vertical;
+  min-height: 36px;
+  max-height: 120px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#message-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+#message-input::placeholder {
+  color: #71717a;
+}
+
+#send-btn {
+  padding: 0 16px;
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  background: #3b82f6;
+  color: #ffffff;
+  cursor: pointer;
+  flex-shrink: 0;
+  height: 36px;
+  transition: background-color 0.2s;
+}
+
+#send-btn:hover {
+  background: #2563eb;
+}
+
+#send-btn:active {
+  background: #1d4ed8;
+}
+
+/* Confirmation Dialog */
+.confirmation-dialog {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirmation-dialog.hidden {
+  display: none;
+}
+
+.confirmation-content {
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 320px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+}
+
+.confirmation-icon {
+  font-size: 32px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.confirmation-content h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-align: center;
+  color: #f4f4f5;
+}
+
+.confirmation-content p {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #a1a1aa;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.confirmation-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.confirmation-actions button {
+  flex: 1;
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  height: 32px;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+
+.btn-secondary {
+  background: #3f3f46;
+  color: #f4f4f5;
+}
+
+.btn-secondary:hover {
+  background: #52525b;
+}
+
+.btn-primary {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background: #2563eb;
+}
+
+.btn-primary:active {
+  background: #1d4ed8;
+}
+
+.btn-secondary:active {
+  background: #71717a;
+}
+
+/* Response Labels */
+.response-label {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.response-label-observation {
+  background: rgba(0, 122, 255, 0.1);
+  color: rgba(0, 122, 255, 1);
+  border: 1px solid rgba(0, 122, 255, 0.3);
+}
+
+.response-label-hypothesis {
+  background: rgba(175, 82, 222, 0.1);
+  color: rgba(175, 82, 222, 1);
+  border: 1px solid rgba(175, 82, 222, 0.3);
+}
+
+.response-label-recommendation {
+  background: rgba(255, 149, 0, 0.1);
+  color: rgba(255, 149, 0, 1);
+  border: 1px solid rgba(255, 149, 0, 0.3);
+}
+
+.response-label-decision {
+  background: rgba(52, 199, 89, 0.1);
+  color: rgba(52, 199, 89, 1);
+  border: 1px solid rgba(52, 199, 89, 0.3);
+}

@@ -121,7 +121,7 @@ def search_memory(
                 identifier=entry["id"],
                 title=entry.get("context", ""),  # context field has title
                 confidence=entry.get("confidence", 0.7),
-                excerpt=entry["content"][:200] if entry.get("content") else None,
+                excerpt=entry["content"][:500] if entry.get("content") else None,
                 timestamp=entry.get("created_at")
             )
             sources.append(source)

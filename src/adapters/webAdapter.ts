@@ -356,6 +356,20 @@ export const webAdapter: Adapter = {
       
       const data = await response.json();
       
+      // 🔒 ENFORCEMENT INVARIANT: Reject non-Maestra responses
+      // All Maestra responses MUST have authority and system_mode
+      if (!data.authority || !data.system_mode) {
+        console.error('[Maestra] INVARIANT VIOLATION: Response missing authority/system_mode', {
+          has_authority: !!data.authority,
+          has_system_mode: !!data.system_mode,
+          answer_preview: data.answer?.substring(0, 100)
+        });
+        throw new Error(
+          'Non-Maestra response blocked. This response did not come from the Maestra backend. ' +
+          'If you see this error, please report it immediately.'
+        );
+      }
+      
       // PRODUCTION: Detect quad-core from real response
       const sources = data.sources || [];
       const hasPersonalMemory = sources.some((s: string) => s.startsWith('personal:'));

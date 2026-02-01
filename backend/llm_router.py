@@ -63,7 +63,7 @@ async def chat_completion(
     messages: List[Dict[str, str]],
     model: Optional[str] = None,
     temperature: float = 0.2,
-    max_tokens: int = 700,
+    max_tokens: int = 2000,
     timeout_s: float = 30.0,
 ) -> str:
     provider, api_key = get_configured_llm_provider()

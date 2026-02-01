@@ -249,7 +249,7 @@ class SessionContinuityTracker:
         session = self.get_or_create_session(session_id)
         
         return {
-            "recent_turns": [t.to_dict() for t in session.turns[-3:]],  # Last 3 turns
+            "recent_turns": [t.to_dict() for t in session.turns[-15:]],  # Last 15 turns
             "open_loops": [l.to_dict() for l in session.open_loops if l.status == "open"],
             "accumulated_context": {
                 k: v.to_dict() for k, v in session.context_accumulation.items()

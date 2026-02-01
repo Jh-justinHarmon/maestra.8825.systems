@@ -760,14 +760,35 @@ async def advisor_ask(request: AdvisorAskRequest) -> AdvisorAskResponse:
     - deep: Creates a research job for thorough investigation
     
     Returns the answer, sources, and optional job_id for deep mode.
-    Gracefully degrades if dependencies unavailable.
+    
+    ENFORCEMENT: All responses pass through EnforcementKernel.enforce().
+    Violations are caught here and converted to honest refusals.
     """
+    from enforcement_kernel import EnforcementViolation
+    
     try:
         response = await ask_advisor(request)
         # Increment LLM call counter
         today = date.today()
         llm_call_counter[today] += 1
         return response
+    except EnforcementViolation as e:
+        # 🔴 ENFORCEMENT VIOLATION — Convert to honest refusal
+        logger.critical(f"🔴 ENFORCEMENT_VIOLATION | type={type(e).__name__} | detail={e}")
+        return AdvisorAskResponse(
+            answer=(
+                "I cannot provide this response because it would misrepresent my sources or capabilities. "
+                f"Reason: {type(e).__name__}"
+            ),
+            session_id=request.session_id,
+            trace_id=str(uuid.uuid4())[:8],
+            mode=request.mode,
+            sources=[],
+            epistemic_state="REFUSED",
+            confidence=0.0,
+            system_mode="full",
+            authority="none"
+        )
     except LLMConfigurationError as e:
         logger.error(f"Advisor misconfigured (LLM): {e}")
         raise HTTPException(

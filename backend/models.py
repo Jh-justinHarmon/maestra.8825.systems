@@ -40,6 +40,15 @@ class SourceReference(BaseModel):
     url: Optional[str] = None
 
 
+class MCPMetadata(BaseModel):
+    """Metadata about MCP usage in a response."""
+    mcp_used: bool = Field(default=False, description="Whether any MCP was used")
+    sentinel_available: bool = Field(default=False, description="Whether Sentinel was available")
+    sentinel_artifacts: int = Field(default=0, description="Number of Sentinel artifacts returned")
+    tool_sources: List[str] = Field(default_factory=list, description="List of tool sources used (e.g., 'sentinel', 'deep_research')")
+    retry_guidance: Optional[str] = Field(None, description="Guidance for retry if MCP unavailable")
+
+
 class AdvisorAskResponse(BaseModel):
     """Response from the Maestra advisor."""
     schema_version: str = Field(default="1", description="API schema version")
@@ -54,8 +63,10 @@ class AdvisorAskResponse(BaseModel):
     turns: Optional[List[dict]] = Field(None, description="Conversation turns (if loading a conversation)")
     agent: Optional[dict] = Field(None, description="Agent that generated this response")
     # TRACK 2: Truth-on-surface fields (mandatory for transparency)
-    system_mode: Literal["full", "minimal"] = Field(..., description="System mode: full (real system) or minimal (emergency stubs)")
-    authority: Literal["system", "memory", "none"] = Field(..., description="Source of authority: system routing, memory lookup, or none")
+    system_mode: Literal["full", "minimal", "local_power"] = Field(..., description="System mode: full (real system), minimal (emergency stubs), or local_power (local tools enabled)")
+    authority: Literal["system", "memory", "tool", "none"] = Field(..., description="Source of authority: system routing, memory lookup, tool (Sentinel/external), or none")
+    # TRACK 5: MCP disclosure fields
+    mcp_metadata: Optional[MCPMetadata] = Field(None, description="Metadata about MCP usage (Track 5)")
 
 
 # ============================================================================

@@ -1,0 +1,14 @@
+{
+  "name": "Maestra Surface",
+  "id": "maestra-surface-v2",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "editorType": ["figma", "figjam"],
+  "ui": "ui.html",
+  "networkAccess": {
+    "allowedDomains": [
+      "https://maestra-backend-8825-systems.fly.dev"
+    ]
+  }
+}

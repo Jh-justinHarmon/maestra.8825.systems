@@ -30,6 +30,7 @@ class GroundingSourceType(str, Enum):
     SESSION_CONTEXT = "session_context"
     DEEP_RESEARCH = "deep_research"
     EXTERNAL_API = "external_api"
+    TOOL = "tool"  # Sentinel, MCP tools, etc.
 
 
 class QueryType(str, Enum):

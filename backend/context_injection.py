@@ -90,9 +90,12 @@ class ContextInjector:
                         context_section += f"  {str(step_result)[:200]}\n"
         
         if grounding_sources:
-            context_section += "\n[GROUNDING SOURCES]\n"
-            for source in grounding_sources:
-                context_section += f"- {source.title} ({source.source_type.value})\n"
+            context_section += "\n[GROUNDING SOURCES - USE THIS INFORMATION TO ANSWER]\n"
+            for i, source in enumerate(grounding_sources, 1):
+                context_section += f"\n--- Source {i}: {source.title} ({source.source_type.value}) ---\n"
+                if source.excerpt:
+                    # Include full excerpt content for the LLM to use
+                    context_section += f"{source.excerpt}\n"
         
         return base_user_prompt + context_section
     
@@ -145,7 +148,8 @@ def inject_context_into_prompt(
     query: str,
     chain_results: Dict[str, Any],
     grounding_sources: List[GroundingSource],
-    epistemic_state: EpistemicState
+    epistemic_state: EpistemicState,
+    formatting_hint: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """
     Convenience function to inject context into prompt.
@@ -155,13 +159,21 @@ def inject_context_into_prompt(
         chain_results: Results from MCP chain execution
         grounding_sources: List of verified grounding sources
         epistemic_state: GROUNDED, UNGROUNDED, or REFUSED
+        formatting_hint: Optional formatting hint for structure adaptation
     
     Returns:
         List of messages ready for LLM
     """
+    base_system_prompt = "You are Maestra, an AI advisor powered by the 8825 system. Provide grounded, honest answers based on verified context."
+    
+    # Add formatting hint if provided (for structure adaptation)
+    if formatting_hint:
+        base_system_prompt += f"\n\n{formatting_hint}"
+    
     return ContextInjector.build_messages(
         query=query,
         chain_results=chain_results,
         grounding_sources=grounding_sources,
-        epistemic_state=epistemic_state
+        epistemic_state=epistemic_state,
+        base_system_prompt=base_system_prompt
     )

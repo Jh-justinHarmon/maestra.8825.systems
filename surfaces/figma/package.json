@@ -1,0 +1,17 @@
+{
+  "name": "figma-maestra-surface",
+  "version": "0.1.0",
+  "description": "Thin-client Figma plugin surface for Maestra",
+  "scripts": {
+    "build": "npm run build:ui && npm run build:plugin && node build-inline.js",
+    "build:plugin": "esbuild plugin/code.ts --bundle --outfile=dist/code.js --target=es2017 --format=iife",
+    "build:ui": "esbuild ui/ui.ts --bundle --outfile=dist/ui.js --target=es2017 --format=iife",
+    "build:assets": "cp ui/index.html dist/ui.html && cp ui/styles.css dist/styles.css && cp plugin/manifest.json dist/manifest.json",
+    "watch": "npm run build -- --watch"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.98.0",
+    "esbuild": "^0.27.2",
+    "typescript": "^5.3.3"
+  }
+}

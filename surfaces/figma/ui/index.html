@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Maestra Surface</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 12px;
+      color: #f4f4f5 !important;
+      background: #27272a !important;
+    }
+  </style>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Maestra</h1>
+      <div class="thread-info">
+        <span class="thread-name" id="thread-name">New Thread</span>
+        <span class="memory-indicator">Memory in Maestra</span>
+      </div>
+    </header>
+    
+    <!-- 🔴 PROMPT 5: VISIBLE LOG PANEL -->
+    <div id="debug-log" style="background: #18181b; border-bottom: 1px solid #3f3f46; padding: 8px; font-size: 10px; font-family: monospace; color: #10b981; max-height: 80px; overflow-y: auto;"></div>
+    
+    <main id="messages-container">
+      <div id="messages"></div>
+    </main>
+    
+    <!-- Confirmation Dialog -->
+    <div id="confirmation-dialog" class="confirmation-dialog hidden">
+      <div class="confirmation-content">
+        <div class="confirmation-icon">⚠️</div>
+        <h3>Confirm Action</h3>
+        <p id="confirmation-message"></p>
+        <div class="confirmation-actions">
+          <button id="confirm-cancel" class="btn-secondary">Cancel</button>
+          <button id="confirm-proceed" class="btn-primary">Proceed</button>
+        </div>
+      </div>
+    </div>
+    
+    <footer>
+      <div class="input-container">
+        <textarea 
+          id="message-input" 
+          placeholder="Ask Maestra anything..."
+          rows="1"
+        ></textarea>
+        <button id="send-btn">Send</button>
+      </div>
+    </footer>
+  </div>
+  
+  <script src="ui.js"></script>
+</body>
+</html>

@@ -117,6 +117,8 @@ else:
 # =============================================================================
 
 from models import AdvisorAskRequest, AdvisorAskResponse, SourceReference
+from turn_instrumentation import instrument_user_turn, instrument_assistant_turn
+from conversation_mediator import get_shadow_mediator
 from optimization import (
     cached_query, monitored_endpoint, speculative_executor,
     performance_monitor
@@ -128,8 +130,151 @@ from epistemic import (
     create_refused_response, create_grounded_response, create_ungrounded_response
 )
 from context_injection import inject_context_into_prompt
+from enforcement_kernel import (
+    EnforcementKernel, ContextTrace, ContextSource,
+    EnforcementViolation, ContextUnavailable, get_enforcement_kernel
+)
+from tool_assertion_classifier import classify_tool_assertion, query_requires_sentinel
+from mcp_context_adapter import query_sentinel, check_sentinel_available, ContextSource as SentinelContextSource
+from models import MCPMetadata
+from config import ENABLE_STRUCTURE_ADAPTATION, STRUCTURE_AB_TEST_PERCENTAGE
+from ab_test import should_apply_structure
+from response_formatter import get_formatting_hint
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# ENFORCEMENT KERNEL (NON-BYPASSABLE)
+# =============================================================================
+
+def build_context_trace(
+    sources: list,
+    required_but_missing: list,
+    system_mode: str
+) -> ContextTrace:
+    """
+    Build a ContextTrace from response assembly data.
+    
+    Args:
+        sources: List of SourceReference objects used in response
+        required_but_missing: List of context sources that were required but unavailable
+        system_mode: Current system mode ("full", "minimal", "local_power")
+    
+    Returns:
+        ContextTrace for enforcement
+    """
+    context_sources = []
+    for source in sources:
+        if source.type == "library":
+            context_sources.append(ContextSource(source="library", identifier=source.title))
+        elif source.type == "chain":
+            # Chain results may include tool calls
+            context_sources.append(ContextSource(source="system"))
+        elif source.type == "routing":
+            context_sources.append(ContextSource(source="system"))
+        elif source.type == "tool":
+            # Determine tool type from title
+            if "sentinel" in source.title.lower():
+                context_sources.append(ContextSource(source="tool:sentinel"))
+            elif "research" in source.title.lower():
+                context_sources.append(ContextSource(source="tool:deep_research"))
+            else:
+                context_sources.append(ContextSource(source="tool:external"))
+    
+    # Default to system if no sources
+    if not context_sources:
+        context_sources.append(ContextSource(source="system"))
+    
+    return ContextTrace(
+        sources=context_sources,
+        required_but_missing=required_but_missing,
+        system_mode=system_mode
+    )
+
+
+def enforce_and_return(
+    response: AdvisorAskResponse,
+    sources: list,
+    required_but_missing: list = None,
+    system_mode: str = "full",
+    epistemic_state: str = "GROUNDED",
+    tool_context_used: bool = False
+) -> AdvisorAskResponse:
+    """
+    Enforce speech rules and return response.
+    
+    This is the ONLY legal exit point for responses.
+    All response returns MUST go through this function.
+    
+    Args:
+        response: The assembled response
+        sources: List of SourceReference objects used
+        required_but_missing: Context that was required but unavailable
+        system_mode: Current system mode
+        epistemic_state: The epistemic state of the response (GROUNDED, UNGROUNDED, REFUSED)
+        tool_context_used: Whether any tool context was successfully invoked
+    
+    Returns:
+        The response (unchanged) if enforcement passes
+    
+    Raises:
+        EnforcementViolation: If response violates speech rules
+    """
+    from refusal_normalizer import normalize_refusal
+    
+    if required_but_missing is None:
+        required_but_missing = []
+    
+    # 🔴 HR-1: REFUSAL NORMALIZATION — runs BEFORE enforcement
+    # Converts soft refusals to hard refusals with authority="none"
+    normalization = normalize_refusal(
+        answer=response.answer,
+        sources=sources,
+        authority=response.authority,
+        epistemic_state=epistemic_state,
+        tool_context_used=tool_context_used
+    )
+    
+    # Apply normalization if needed
+    effective_authority = normalization.normalized_authority
+    effective_epistemic_state = normalization.normalized_epistemic_state
+    
+    # If normalized, we need to update the response
+    if normalization.is_soft_refusal and normalization.normalized_authority == "none":
+        # Create a new response with normalized values
+        response = AdvisorAskResponse(
+            answer=normalization.normalized_answer,
+            session_id=response.session_id,
+            trace_id=response.trace_id,
+            mode=response.mode,
+            sources=response.sources,
+            system_mode=response.system_mode,
+            authority="none",  # Normalized
+            job_id=response.job_id,
+            processing_time_ms=response.processing_time_ms,
+            conversation_id=response.conversation_id,
+            turns=response.turns,
+            agent=response.agent,
+        )
+        effective_authority = "none"
+        effective_epistemic_state = "REFUSED"
+    
+    context_trace = build_context_trace(sources, required_but_missing, system_mode)
+    
+    # Create a minimal object for enforcement
+    class ResponseForEnforcement:
+        def __init__(self, resp, ep_state, auth):
+            self.authority = auth
+            self.system_mode = resp.system_mode
+            self.epistemic_state = ep_state.upper() if isinstance(ep_state, str) else str(ep_state)
+    
+    enforcement_response = ResponseForEnforcement(response, effective_epistemic_state, effective_authority)
+    
+    # 🔴 ENFORCEMENT KERNEL — NON-BYPASSABLE
+    kernel = get_enforcement_kernel()
+    kernel.enforce(enforcement_response, context_trace)
+    
+    return response
 
 # =============================================================================
 # MINIMAL MODE ADVISOR (Bypasses all system dependencies)
@@ -193,7 +338,7 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
         )
         
         logger.critical(f"🔴 REFUSAL_RETURNING | trace_id={trace_id} | epistemic_state=REFUSED")
-        return response
+        return enforce_and_return(response, sources=[], system_mode="minimal", epistemic_state="REFUSED")
     
     logger.critical(f"🔴 REFUSAL_BYPASSED | trace_id={trace_id} | This should not happen for memory-required queries!")
     
@@ -207,7 +352,7 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
     
     answer = await chat_completion(messages=messages)
     
-    return AdvisorAskResponse(
+    response = AdvisorAskResponse(
         answer=answer,
         sources=[],
         epistemic_state=EpistemicState.UNGROUNDED,
@@ -216,8 +361,9 @@ async def minimal_process_quick_question(request: AdvisorAskRequest) -> AdvisorA
         session_id=request.session_id,
         mode="quick",
         system_mode="minimal",
-        authority="none"
+        authority="system"  # Ungrounded responses use system authority
     )
+    return enforce_and_return(response, sources=[], system_mode="minimal", epistemic_state="UNGROUNDED")
 
 # MCP client paths - these would be replaced with actual MCP calls in production
 JH_BRAIN_URL = os.getenv("JH_BRAIN_URL", "http://localhost:8825")
@@ -250,6 +396,51 @@ def _load_8825_knowledge() -> str:
     return _8825_KNOWLEDGE
 
 
+def extract_search_keywords(query: str) -> str:
+    """
+    Extract meaningful search keywords from a natural language question.
+    
+    Removes common question words and stop words to get searchable terms.
+    Handles special identity queries that would otherwise be stripped entirely.
+    """
+    query_lower = query.lower().strip()
+    
+    # Special case: identity queries - map to searchable terms
+    identity_patterns = [
+        'who am i', 'who are you', 'what am i', 'tell me about myself',
+        'what do you know about me', 'do you know me', 'my name', 'my profile'
+    ]
+    for pattern in identity_patterns:
+        if pattern in query_lower:
+            # Search for user profile, owner, Justin, Harmon, etc.
+            return 'Justin Harmon user owner profile'
+    
+    # Common question words and stop words to remove
+    stop_words = {
+        'what', 'is', 'are', 'was', 'were', 'who', 'whom', 'which', 'where', 'when',
+        'why', 'how', 'can', 'could', 'would', 'should', 'do', 'does', 'did',
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'into', 'through', 'during', 'before',
+        'after', 'above', 'below', 'between', 'under', 'again', 'further', 'then',
+        'once', 'here', 'there', 'all', 'each', 'few', 'more', 'most', 'other',
+        'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than',
+        'too', 'very', 'just', 'about', 'tell', 'me', 'us', 'you', 'your', 'my',
+        'our', 'i', 'we', 'they', 'it', 'this', 'that', 'these', 'those', 'be',
+        'been', 'being', 'have', 'has', 'had', 'having', 'will', 'shall', 'am'
+    }
+    
+    # Tokenize and filter
+    words = query_lower.split()
+    keywords = [w.strip('?.,!;:') for w in words if w.strip('?.,!;:') not in stop_words]
+    
+    # If we filtered everything, use the original query
+    if not keywords:
+        return query
+    
+    # Return space-separated keywords for OR-style matching
+    return ' '.join(keywords)
+
+
 def search_8825_library(query: str, max_entries: int = 5, session_id: str = None) -> tuple[List[GroundingSource], bool]:
     """
     Search the 8825 library for relevant context via Context Router.
@@ -267,8 +458,12 @@ def search_8825_library(query: str, max_entries: int = 5, session_id: str = None
     # Ensure session has a router (creates default system-only if missing)
     ensure_session_initialized(session_id)
     
-    # Use router-enforced memory search
-    return search_memory(session_id, query, max_entries)
+    # Extract keywords for better search matching
+    search_query = extract_search_keywords(query)
+    logger.info(f"Library search: original='{query[:50]}' -> keywords='{search_query}'")
+    
+    # Use router-enforced memory search with extracted keywords
+    return search_memory(session_id, search_query, max_entries)
 
 
 async def get_context_from_brain(topic: str, focus: str = "global") -> Tuple[str, List[SourceReference]]:
@@ -426,25 +621,27 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 "display_name": agent.display_name
             } if agent else {"id": "assistant", "display_name": "Assistant"}
             
-            return AdvisorAskResponse(
+            conv_sources = [
+                SourceReference(
+                    title="Conversation History",
+                    type="conversation",
+                    confidence=1.0,
+                    excerpt=f"{len(session.turns)} turns loaded"
+                )
+            ]
+            response = AdvisorAskResponse(
                 answer=f"Loaded conversation '{potential_id}' with {len(session.turns)} turns",
                 trace_id=trace_id,
                 session_id=request.session_id,
                 mode="quick",
-                sources=[
-                    SourceReference(
-                        title="Conversation History",
-                        type="conversation",
-                        confidence=1.0,
-                        excerpt=f"{len(session.turns)} turns loaded"
-                    )
-                ],
+                sources=conv_sources,
                 conversation_id=potential_id,
                 turns=[t.to_dict() for t in session.turns],
                 agent=agent_info,
                 system_mode="full",
                 authority="memory"
             )
+            return enforce_and_return(response, sources=conv_sources, system_mode="full", epistemic_state="GROUNDED")
         # Check if it's a library entry ID (16 hex chars)
         elif re.match(r'^[a-f0-9]{16}$', potential_id.lower()):
             # Already handled above via library_context, continue to normal processing
@@ -457,7 +654,7 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 "display_name": agent.display_name
             } if agent else {"id": "assistant", "display_name": "Assistant"}
             
-            return AdvisorAskResponse(
+            response = AdvisorAskResponse(
                 answer=f"Conversation '{potential_id}' not found or is empty",
                 trace_id=trace_id,
                 session_id=request.session_id,
@@ -467,18 +664,36 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
                 turns=[],
                 agent=agent_info,
                 system_mode="full",
-                authority="none"
+                authority="system"  # No memory sources, use system
             )
+            return enforce_and_return(response, sources=[], system_mode="full", epistemic_state="UNGROUNDED")
     
     all_sources: List[SourceReference] = []
     
-    # Add user query to session continuity
+    # Capture start time for latency measurement
+    start_time_ms = int(time.time() * 1000)
+    
+    # Classify query early for metadata logging (behavior unchanged)
+    query_type_classification = classify_query(question)
+    tool_assertion_classification = classify_tool_assertion(question)
+    
+    # Add user query to session continuity with instrumentation
+    user_metadata = instrument_user_turn(
+        query=question,
+        start_time_ms=start_time_ms,
+        epistemic_query_type=query_type_classification.value,
+        tool_required=tool_assertion_classification.requires_tool,
+        tool_name=tool_assertion_classification.tool_name if tool_assertion_classification.requires_tool else None,
+        classification_confidence=tool_assertion_classification.confidence
+    )
+    user_metadata["mode"] = "quick"  # Preserve existing metadata
+    
     add_turn(
         session_id=request.session_id,
         turn_id=trace_id,
         turn_type="user_query",
         content=question,
-        metadata={"mode": "quick"}
+        metadata=user_metadata
     )
     
     # Get context from previous turns
@@ -593,13 +808,111 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     
     # Classify query to determine if grounding is required
     query_type = classify_query(question)
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TRACK 5: SENTINEL MCP INTEGRATION
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Check if query requires Sentinel (explicit tool assertion)
+    tool_assertion = classify_tool_assertion(question)
+    sentinel_sources = []
+    sentinel_errors = []
+    sentinel_required_but_missing = False
+    tool_context_used = False
+    
+    if tool_assertion.requires_tool and tool_assertion.tool_name in ["sentinel", "internal_documents"]:
+        logger.info(f"🔧 Tool assertion detected: {tool_assertion.tool_name} required for query")
+        
+        # Query Sentinel MCP
+        try:
+            sentinel_sources, sentinel_errors, sentinel_required_but_missing = await query_sentinel(
+                query=question,
+                required=True,  # Tool was explicitly asserted
+                max_results=10
+            )
+            
+            if sentinel_sources:
+                tool_context_used = True
+                logger.info(f"✅ Sentinel returned {len(sentinel_sources)} sources")
+                
+                # Add Sentinel sources to all_sources with tool type
+                for src in sentinel_sources:
+                    # SentinelContextSource has: type, excerpt, confidence, artifact_id, uri, timestamp
+                    artifact_label = src.artifact_id or "artifact"
+                    excerpt_text = src.excerpt[:200] if src.excerpt else ""
+                    
+                    all_sources.append(SourceReference(
+                        title=f"Sentinel: {artifact_label}",
+                        type="tool",
+                        confidence=src.confidence,
+                        excerpt=excerpt_text
+                    ))
+                    # Also add to library_sources for grounding
+                    library_sources.append(GroundingSource(
+                        source_type=GroundingSourceType.TOOL,
+                        identifier=src.artifact_id or "sentinel",
+                        title=f"Sentinel: {artifact_label}",
+                        confidence=src.confidence,
+                        excerpt=src.excerpt
+                    ))
+                library_found = True  # Sentinel sources count as found
+            else:
+                logger.warning(f"⚠️ Sentinel returned no sources (errors: {sentinel_errors})")
+                # If Sentinel returned no sources but was required, mark as missing
+                if tool_assertion.required:
+                    sentinel_required_but_missing = True
+                
+        except Exception as e:
+            logger.error(f"❌ Sentinel query failed: {e}")
+            sentinel_required_but_missing = True
+            sentinel_errors.append(str(e))
+        
+        # If Sentinel was required but unavailable, refuse immediately
+        if sentinel_required_but_missing:
+            logger.critical(f"🔴 SENTINEL_REQUIRED_BUT_MISSING | query={question[:50]} | errors={sentinel_errors}")
+            
+            # Build MCP metadata for disclosure
+            mcp_metadata = MCPMetadata(
+                mcp_used=False,
+                sentinel_available=False,
+                sentinel_artifacts=0,
+                tool_sources=[],
+                retry_guidance="Sentinel is currently unavailable. Try again later or rephrase without referencing Sentinel."
+            )
+            
+            response = AdvisorAskResponse(
+                answer=(
+                    f"I cannot answer this question because it requires Sentinel, "
+                    f"which is currently unavailable.\n\n"
+                    f"Your query explicitly referenced '{tool_assertion.matched_pattern}', "
+                    f"which requires tool access I don't have right now.\n\n"
+                    f"**What would help:**\n"
+                    f"- Try again later when Sentinel is available\n"
+                    f"- Rephrase your question without referencing Sentinel"
+                ),
+                trace_id=trace_id,
+                session_id=request.session_id,
+                mode="quick",
+                sources=[],
+                system_mode="full",
+                authority="none",
+                mcp_metadata=mcp_metadata
+            )
+            return enforce_and_return(
+                response, 
+                sources=[], 
+                required_but_missing=["sentinel"],
+                system_mode="full", 
+                epistemic_state="REFUSED"
+            )
+    # ═══════════════════════════════════════════════════════════════════════════
+    
     grounding_result = verify_grounding(
         query=question,
         sources=library_sources,
         trace_id=trace_id
     )
     
-    logger.info(f"Query type: {query_type.value}, Grounding required: {grounding_result.requires_grounding}, Sources found: {library_found}")
+    logger.info(f"Query type: {query_type.value}, Grounding required: {grounding_result.requires_grounding}, Sources found: {library_found}, Tool context: {tool_context_used}")
     
     # If grounding is required but no sources found, refuse to answer
     if grounding_result.requires_grounding and not library_found:
@@ -636,7 +949,7 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         )
         
         logger.critical(f"🔴 REFUSAL_RETURNING | trace_id={trace_id} | epistemic_state=REFUSED | about_to_return=True")
-        return AdvisorAskResponse(
+        response = AdvisorAskResponse(
             answer=refused_response.answer,
             trace_id=trace_id,
             session_id=request.session_id,
@@ -647,8 +960,9 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
             confidence=refused_response.confidence,
             agent=agent_info,
             system_mode="full",
-            authority="system"
+            authority="none"  # Refusals must claim authority="none"
         )
+        return enforce_and_return(response, sources=[], system_mode="full", epistemic_state="REFUSED")
     
     logger.critical(f"🔴 REFUSAL_BYPASSED | trace_id={trace_id} | execution_continued_past_refusal_block=True | THIS_SHOULD_NOT_HAPPEN")
     
@@ -727,14 +1041,40 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     if client_context_text:
         chain_results["client_context"] = client_context_text
     if previous_context.get('recent_turns'):
-        chain_results["conversation_history"] = str(previous_context.get('recent_turns', []))[:1500]
+        chain_results["conversation_history"] = str(previous_context.get('recent_turns', []))[:8000]
+    
+    # Shadow Mediator: Compute response-shaping decision
+    shadow_mediator = get_shadow_mediator()
+    mediator_decision = shadow_mediator.compute_decision(
+        query=question,
+        recent_turns=previous_context.get('recent_turns', []),
+        query_metadata=user_metadata,
+        session_context=previous_context
+    )
+    # Store decision in assistant metadata for telemetry
+    mediator_decision_dict = mediator_decision.to_dict()
+    
+    # Structure Adaptation: Determine if structured formatting should be applied
+    apply_structure, ab_group = should_apply_structure(
+        tools_requested=user_metadata.get("tools_requested", False),
+        mediator_structure=mediator_decision.structure,
+        mediator_confidence=mediator_decision.confidence,
+        session_id=request.session_id,
+        feature_enabled=ENABLE_STRUCTURE_ADAPTATION,
+        test_percentage=STRUCTURE_AB_TEST_PERCENTAGE
+    )
+    
+    # Get formatting hint if structure should be applied
+    formatting_hint = get_formatting_hint(apply_structure) if apply_structure else None
     
     # Use context injection to build messages with verified grounding
+    # NOTE: formatting_hint is added to system prompt if structure is enabled
     messages = inject_context_into_prompt(
         query=question,
         chain_results=chain_results,
         grounding_sources=library_sources,
-        epistemic_state=epistemic_state
+        epistemic_state=epistemic_state,
+        formatting_hint=formatting_hint
     )
     
     logger.info(f"Built messages with epistemic_state={epistemic_state.value}, sources={len(library_sources)}")
@@ -767,18 +1107,39 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         }
     )
     
-    # Add assistant response to session continuity
+    # Add assistant response to session continuity with instrumentation
+    tools_used = []
+    if sentinel_sources:
+        tools_used.append("sentinel")
+    if routing and routing.get('pattern'):
+        tools_used.append(routing['pattern'])
+    
+    assistant_metadata = instrument_assistant_turn(
+        response=answer,
+        start_time_ms=start_time_ms,
+        query_type=user_metadata.get("query_type"),
+        tools_used=tools_used if tools_used else None,
+        confidence=grounding_result.confidence if grounding_result else None
+    )
+    
+    # Preserve existing metadata
+    assistant_metadata.update({
+        "mode": "quick",
+        "routing_pattern": routing['pattern'],
+        "sources_count": len(all_sources),
+        "epistemic_state": epistemic_state.value,
+        "shadow_mediator_decision": mediator_decision_dict,
+        "ab_test_group": ab_group,  # A/B test group assignment
+        "structure_applied": apply_structure,  # Whether structured formatting was applied
+        "structure_feature_enabled": ENABLE_STRUCTURE_ADAPTATION  # Feature flag state
+    })
+    
     add_turn(
         session_id=request.session_id,
         turn_id=trace_id,
         turn_type="assistant_response",
         content=answer,
-        metadata={
-            "mode": "quick",
-            "routing_pattern": routing['pattern'],
-            "sources_count": len(all_sources),
-            "epistemic_state": epistemic_state.value
-        }
+        metadata=assistant_metadata
     )
     
     processing_time = int((time.time() - start_time) * 1000)
@@ -820,11 +1181,27 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         }
     )
     
-    # Determine authority based on whether we found library sources
+    # Determine authority based on source types (tool > memory > system)
+    has_tool_sources = any(s.type == "tool" for s in all_sources)
     has_library_sources = any(s.type == "library" for s in all_sources)
-    authority = "memory" if has_library_sources else "system"
     
-    return AdvisorAskResponse(
+    if has_tool_sources:
+        authority = "tool"  # Tool sources take precedence
+    elif has_library_sources:
+        authority = "memory"
+    else:
+        authority = "system"
+    
+    # Build MCP metadata for disclosure
+    mcp_metadata = MCPMetadata(
+        mcp_used=has_tool_sources,
+        sentinel_available=True if has_tool_sources else False,
+        sentinel_artifacts=len([s for s in all_sources if s.type == "tool"]),
+        tool_sources=["sentinel"] if has_tool_sources else [],
+        retry_guidance=None
+    )
+    
+    response = AdvisorAskResponse(
         answer=answer,
         session_id=request.session_id,
         job_id=None,
@@ -837,8 +1214,10 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
         confidence=grounding_result.confidence,
         agent=agent_info,
         system_mode="full",
-        authority=authority
+        authority=authority,
+        mcp_metadata=mcp_metadata
     )
+    return enforce_and_return(response, sources=all_sources, system_mode="full", epistemic_state=epistemic_state.value, tool_context_used=has_tool_sources)
 
 
 async def process_deep_question(request: AdvisorAskRequest) -> AdvisorAskResponse:
@@ -874,7 +1253,7 @@ async def process_deep_question(request: AdvisorAskRequest) -> AdvisorAskRespons
         "display_name": agent.display_name
     } if agent else {"id": "assistant", "display_name": "Assistant"}
     
-    return AdvisorAskResponse(
+    response = AdvisorAskResponse(
         answer=f"Deep research job created. Poll /api/maestra/research/{job_id} for status.",
         session_id=request.session_id,
         job_id=job_id,
@@ -886,6 +1265,7 @@ async def process_deep_question(request: AdvisorAskRequest) -> AdvisorAskRespons
         system_mode="full",
         authority="system"
     )
+    return enforce_and_return(response, sources=[], system_mode="full", epistemic_state="UNGROUNDED")
 
 
 @monitored_endpoint("advisor_ask")
