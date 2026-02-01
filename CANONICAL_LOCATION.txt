@@ -1,0 +1,21 @@
+CANONICAL LOCATION FOR MAESTRA.8825.SYSTEMS
+
+Path: ~/Dropbox/8825-Team/8825/apps/maestra.8825.systems
+
+Evidence:
+- Active Fly.io deployment (maestra-backend-8825-systems v95)
+- 94 commits in last 60 days (most recent: 2026-02-01)
+- Referenced by 8825 system agents in context caches
+- Production deployment focus (enforcement kernel, instrumentation)
+- Clean Git history (zero rebases)
+- System coupling (migration docs, agent registry)
+
+Consolidated: 2026-02-01
+Validation: 7-question protocol (6/7 favor this location)
+Method: Evidence-based validation, not assumption
+
+Non-canonical locations archived:
+- apps/maestra.8825.systems → _archive/maestra_forks_20260201/
+- CascadeProjects/maestra.8825.systems → deleted (backed up)
+
+Backup: maestra_consolidation_backup_20260201_171740.tar.gz (69MB)
