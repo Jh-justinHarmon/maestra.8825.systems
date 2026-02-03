@@ -403,13 +403,13 @@ export const webAdapter: Adapter = {
             schema_version: SCHEMA_VERSION,
             message: {
               id: crypto.randomUUID(),
-              role: 'assistant',
+              role: 'assistant' as const,
               content: "⚠️ Internal error: backend attempted implicit conversation load",
               timestamp: new Date().toISOString(),
               sources: [],
               mode: 'quick'
             }
-          };
+          } as Response;
         }
         
         // Track quad-core activation if personal memory was used
