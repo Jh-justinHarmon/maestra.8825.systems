@@ -37,30 +37,68 @@ function AppContent() {
   }, [modeMatch.mode.id, modeMatch.confidence]);
 
   // Poll conversation feed for real-time sync across surfaces
+  // 
+  // CRITICAL: This polling logic MUST preserve local optimistic messages.
+  // Backend may legally return empty state (404, empty turns) when:
+  // - DATABASE_URL is not configured
+  // - Persistence layer is unavailable
+  // - Session has not yet synced to database
+  // 
+  // Destructive replace (setMessages(serverMessages)) is FORBIDDEN.
+  // Always merge server state with local state to prevent message loss.
   useEffect(() => {
-    const pollInterval = setInterval(async () => {
+    let pollInterval: NodeJS.Timeout | undefined;
+
+    // Skip polling if backend indicates persistence unavailable
+    const initPolling = async () => {
       try {
         const apiBase = localStorage.getItem('maestra_api_override') || 'http://localhost:8825';
-        const response = await fetch(`${apiBase}/api/maestra/conversation/${conversationId}`);
-        if (!response.ok) return;
-        
-        const data = await response.json();
-        if (data.turns && data.turns.length > messages.length) {
-          // New turns arrived; sync them
-          const newMessages = data.turns.map((turn: any) => ({
-            id: turn.turn_id,
-            role: turn.type === 'user_query' ? 'user' as const : 'assistant' as const,
-            content: turn.content,
-            timestamp: turn.timestamp,
-          }));
-          setMessages(newMessages);
+        const healthResponse = await fetch(`${apiBase}/health`);
+        if (healthResponse.ok) {
+          const health = await healthResponse.json();
+          if (health.persistence === false || health.database_url === false) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[Maestra] Conversation polling disabled: persistence unavailable');
+            }
+            return;
+          }
         }
-      } catch (error) {
-        // Silently fail; backend might be offline
+      } catch {
+        // Assume persistence available if health check fails
       }
-    }, 1000);
 
-    return () => clearInterval(pollInterval);
+      pollInterval = setInterval(async () => {
+        try {
+          const apiBase = localStorage.getItem('maestra_api_override') || 'http://localhost:8825';
+          const response = await fetch(`${apiBase}/api/maestra/conversation/${conversationId}`);
+          if (!response.ok) return;
+        
+          const data = await response.json();
+          if (data.turns && data.turns.length > messages.length) {
+            // New turns arrived; sync them
+            const newMessages = data.turns.map((turn: any) => ({
+              id: turn.turn_id,
+              role: turn.type === 'user_query' ? 'user' as const : 'assistant' as const,
+              content: turn.content,
+              timestamp: turn.timestamp,
+            }));
+            setMessages((prev) => {
+              const serverIds = new Set(newMessages.map((m: Message) => m.id));
+              const localOnly = prev.filter((m: Message) => !serverIds.has(m.id));
+              return [...newMessages, ...localOnly];
+            });
+          }
+        } catch (error) {
+          // Silently fail; backend might be offline
+        }
+      }, 1000);
+    };
+
+    initPolling();
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
   }, [conversationId, messages.length]);
 
   const handleSendMessage = useCallback(async (content: string, context?: Context) => {
@@ -96,11 +134,13 @@ function AppContent() {
       }, duration);
       
       setMessages((prev) => [...prev, response.message]);
+      setIsStreaming(false); // STEP 3: Kill typing state
     } catch (error) {
       breadcrumbTrail.addError('Message failed', { 
         error: error instanceof Error ? error.message : String(error) 
       });
-      console.error('Failed to send message:', error);
+      console.error('Error sending message:', error);
+      setIsStreaming(false); // STEP 3: Kill typing state on error
     } finally {
       breadcrumbTrail.endExecution();
       setIsStreaming(false);

@@ -300,15 +300,20 @@ export const webAdapter: Adapter = {
           clearTimeout(timeoutId);
 
           if (!response.ok) {
-            return null;
+            // STREAMING DISABLED — FALL BACK TO JSON (HARD FIX)
+            const streaming = false;
+            const data = await response.json();
+            
+            // FIX 6: Fail-loud if backend returns invalid response
+            if (!data || typeof data.answer !== "string") {
+              throw new Error("INVALID_BACKEND_RESPONSE");
+            }
+            return {
+              summary: data.summary,
+              relevant: data.relevant_k_ids,
+              selection: context?.selection,
+            };
           }
-
-          const data = await response.json();
-          return {
-            summary: data.summary,
-            relevant: data.relevant_k_ids,
-            selection: context?.selection,
-          };
         } catch (error) {
           return null;
         }
@@ -386,6 +391,34 @@ export const webAdapter: Adapter = {
         // PROD-SAFE ASSERTION: Warn if quad-core active but no personal memory for >3 responses
         if (responsesWithoutPersonalMemory > 3) {
           console.warn('[Maestra] Quad-Core active but no personal memory detected in last 3+ responses');
+        }
+        
+        // PROMPT G: UI safety net - detect implicit conversation load attempts
+        if (data.answer && 
+            data.answer.startsWith("Conversation '") && 
+            !message.trim().toLowerCase().startsWith('load ')) {
+          console.error('[MAESTRA] Backend attempted implicit conversation load:', {
+            userInput: message,
+            backendResponse: data.answer
+          });
+          return {
+            answer: "⚠️ Internal error: backend attempted implicit conversation load",
+            conversationId: null,
+            turns: [],
+            epistemicState: 'REFUSED',
+            confidence: 0,
+            groundingSources: [],
+            traceId: data.trace_id || 'error',
+            processingTimeMs: 0
+          };
+        }
+        
+        // Track quad-core activation if personal memory was used
+        if (data.personal_memory_used) {
+          quadCoreActivated = true;
+          responsesWithoutPersonalMemory = 0;
+        } else if (quadCoreActivated) {
+          responsesWithoutPersonalMemory++;
         }
       } else if (quadCoreActivated && hasPersonalMemory) {
         responsesWithoutPersonalMemory = 0;
