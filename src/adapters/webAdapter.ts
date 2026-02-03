@@ -400,14 +400,15 @@ export const webAdapter: Adapter = {
             backendResponse: (data as any).answer
           });
           return {
-            answer: "⚠️ Internal error: backend attempted implicit conversation load",
-            conversationId: null,
-            turns: [],
-            epistemicState: 'REFUSED',
-            confidence: 0,
-            groundingSources: [],
-            traceId: data.trace_id || 'error',
-            processingTimeMs: 0
+            schema_version: SCHEMA_VERSION,
+            message: {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: "⚠️ Internal error: backend attempted implicit conversation load",
+              timestamp: new Date().toISOString(),
+              sources: [],
+              mode: 'quick'
+            }
           };
         }
         
