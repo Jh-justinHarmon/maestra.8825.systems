@@ -1,0 +1,70 @@
+name: Enforcement Regression Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  enforcement-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd apps/maestra.8825.systems/backend
+        pip install pytest pytest-asyncio
+        pip install -r requirements.txt || true
+    
+    - name: Run enforcement structural tests
+      run: |
+        cd apps/maestra.8825.systems/backend
+        pytest tests/test_enforcement_structural.py -v --tb=short
+      
+    - name: Run enforcement invocation tests
+      run: |
+        cd apps/maestra.8825.systems/backend
+        pytest tests/test_enforcement_invocation.py -v --tb=short
+    
+    - name: Run MCP required tests
+      run: |
+        cd apps/maestra.8825.systems/backend
+        pytest tests/test_mcp_required.py -v --tb=short
+    
+    - name: Verify enforcement violations block output
+      run: |
+        cd apps/maestra.8825.systems/backend
+        python3 << 'EOF'
+        from enforcement_kernel import EnforcementKernel, ContextTrace, ContextSource, AuthorityViolation
+        from dataclasses import dataclass
+        
+        @dataclass
+        class FakeResponse:
+            authority: str
+            epistemic_state: str
+            system_mode: str
+        
+        kernel = EnforcementKernel()
+        context = ContextTrace(
+            sources=[ContextSource(source='tool:sentinel')],
+            required_but_missing=[],
+            system_mode='full'
+        )
+        response = FakeResponse(authority='system', epistemic_state='GROUNDED', system_mode='full')
+        
+        try:
+            kernel.enforce(response, context)
+            print('FAIL: Enforcement did not raise')
+            exit(1)
+        except AuthorityViolation:
+            print('PASS: Enforcement raised as expected')
+            exit(0)
+        EOF

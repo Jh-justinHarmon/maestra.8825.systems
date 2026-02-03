@@ -211,6 +211,10 @@ class MCPChain:
             raise RuntimeError("Workspace root not found")
         
         # Map MCP types to their relative server paths
+        # REQUIRED MCPs: library_bridge, context_builder (local, file-based)
+        # OPTIONAL MCPs: deep_research, project_planning (external dependencies)
+        REQUIRED_MCPS = {"library_bridge", "context_builder"}
+        
         mcp_servers = {
             "context_builder": "mcp_servers/context-builder/server.js",
             "library_bridge": "mcp_servers/library-bridge/server.js",
@@ -225,8 +229,17 @@ class MCPChain:
         server_path = os.path.join(workspace_root, relative_path)
         
         if not os.path.exists(server_path):
-            logger.error(f"MCP server not found at {server_path}")
-            raise RuntimeError(f"MCP server not found: {step.mcp_type}")
+            # REQUIRED MCPs must exist - fail loudly
+            if step.mcp_type in REQUIRED_MCPS:
+                logger.critical(f"🔴 REQUIRED MCP missing: {step.mcp_type} at {server_path}")
+                raise RuntimeError(
+                    f"REQUIRED MCP not found: {step.mcp_type}. "
+                    f"System cannot start without this MCP. "
+                    f"Expected at: {server_path}"
+                )
+            else:
+                logger.error(f"MCP server not found at {server_path}")
+                raise RuntimeError(f"MCP server not found: {step.mcp_type}")
         
         try:
             # Call the actual MCP server via subprocess
@@ -274,6 +287,52 @@ class MCPChain:
         except Exception as e:
             logger.error(f"Error executing MCP {step.mcp_type}: {e}")
             raise
+
+# Startup validation for REQUIRED MCPs
+def validate_required_mcps():
+    """
+    Validate that REQUIRED MCPs exist on startup.
+    Crashes if any REQUIRED MCP is missing.
+    """
+    import os
+    from pathlib import Path
+    
+    try:
+        from library_accessor import find_workspace_root
+        workspace_root = find_workspace_root()
+    except Exception as e:
+        logger.critical(f"🔴 STARTUP FAILED: Cannot find workspace root: {e}")
+        raise RuntimeError("Workspace root not found - cannot validate MCPs")
+    
+    REQUIRED_MCPS = {
+        "library_bridge": "mcp_servers/library-bridge/server.js",
+        "context_builder": "mcp_servers/context-builder/server.js",
+    }
+    
+    missing = []
+    for mcp_name, relative_path in REQUIRED_MCPS.items():
+        server_path = os.path.join(workspace_root, relative_path)
+        if not os.path.exists(server_path):
+            missing.append(f"{mcp_name} (expected at {server_path})")
+    
+    if missing:
+        logger.critical(f"🔴 STARTUP FAILED: REQUIRED MCPs missing: {', '.join(missing)}")
+        raise RuntimeError(
+            f"REQUIRED MCPs missing: {', '.join(missing)}. "
+            "System cannot start without these MCPs."
+        )
+    
+    logger.info(f"✅ All REQUIRED MCPs validated: {', '.join(REQUIRED_MCPS.keys())}")
+
+# Run validation on module import (skip in minimal mode)
+import os
+MINIMAL_MODE = os.getenv("MAESTRA_MINIMAL_MODE", "false").lower() == "true"
+if not MINIMAL_MODE:
+    try:
+        validate_required_mcps()
+    except RuntimeError as e:
+        logger.critical(str(e))
+        raise
 
 # Global chain orchestrator
 chain_orchestrator = MCPChain()

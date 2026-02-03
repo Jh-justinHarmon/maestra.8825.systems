@@ -30,12 +30,33 @@ npm install
 npm run dev
 
 # In another terminal, start backend
-cd backend
-python3 -m uvicorn server:app --reload
+./apps/maestra.8825.systems/backend/start.sh
 ```
 
 UI will be at `http://localhost:5173`  
 Backend will be at `http://localhost:8825`
+
+**⚠️ CRITICAL DEVELOPER RULE:**
+
+**"If /health does not prove identity, assume you are debugging the wrong system."**
+
+This rule overrides intuition, logs, and assumptions.
+
+Before any debugging session, run:
+```bash
+./apps/maestra.8825.systems/backend/verify_runtime.sh
+```
+
+Expected: `✅ PASS: All runtime identity checks passed`
+
+If verification fails, STOP immediately.
+
+**Required reading:**
+- [`CANONICAL_REALITY.md`](../../CANONICAL_REALITY.md) - Authoritative backend documentation
+- [`START_BACKEND.md`](backend/START_BACKEND.md) - Canonical startup instructions
+- [`verify_runtime.sh`](backend/verify_runtime.sh) - Runtime proof command
+
+**This rule is non-negotiable.**
 
 ---
 

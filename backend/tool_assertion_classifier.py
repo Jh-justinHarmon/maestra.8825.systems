@@ -67,6 +67,7 @@ class ToolAssertionResult:
     tool_name: Optional[str]
     matched_pattern: Optional[str]
     original_query: str
+    confidence: float = 1.0  # Confidence in the classification
 
 
 # ─────────────────────────────────────────────

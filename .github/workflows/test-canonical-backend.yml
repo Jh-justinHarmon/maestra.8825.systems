@@ -1,0 +1,90 @@
+name: Canonical Backend Enforcement
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  enforce-canonical-backend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        pip install pytest
+    
+    - name: HARD FAIL - Shadow backend imports
+      run: |
+        echo "🔍 Checking for shadow backend imports..."
+        
+        # Check if shadow backends are importable
+        CANONICAL_BACKEND="apps/maestra.8825.systems/backend"
+        
+        # Test 1: system/maestra/ must NOT be importable
+        if [ -f "system/maestra/maestra_backend.py" ]; then
+          echo "Testing system/maestra/maestra_backend.py..."
+          python3 -c "
+import sys
+sys.path.insert(0, 'system/maestra')
+try:
+    import maestra_backend
+    print('❌ FATAL: Shadow backend at system/maestra/ is importable')
+    sys.exit(1)
+except RuntimeError as e:
+    if 'FATAL' in str(e) and 'deprecated' in str(e):
+        print('✅ PASS: Shadow backend crashes on import')
+    else:
+        print('❌ FATAL: Shadow backend exists but wrong error')
+        sys.exit(1)
+" || exit 1
+        fi
+        
+        # Test 2: system/tools/maestra_backend/ must have poison file
+        if [ -d "system/tools/maestra_backend" ]; then
+          if [ ! -f "system/tools/maestra_backend/__DEPRECATED_DO_NOT_RUN__.py" ]; then
+            echo "❌ FATAL: Shadow backend at system/tools/maestra_backend/ is missing poison file"
+            exit 1
+          fi
+          echo "✅ PASS: Poison file exists at system/tools/maestra_backend/"
+        fi
+        
+        # Test 3: Only canonical backend should have server.py and advisor.py
+        echo "Checking for duplicate server.py files..."
+        SERVER_FILES=$(find . -name "server.py" -path "*/backend/*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "*/venv/*" | wc -l)
+        if [ "$SERVER_FILES" -gt 1 ]; then
+          echo "❌ FATAL: Multiple server.py files found in backend directories:"
+          find . -name "server.py" -path "*/backend/*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "*/venv/*"
+          exit 1
+        fi
+        echo "✅ PASS: Only one server.py in backend directories"
+        
+        echo "Checking for duplicate advisor.py files..."
+        ADVISOR_FILES=$(find . -name "advisor.py" -path "*/backend/*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "*/venv/*" | wc -l)
+        if [ "$ADVISOR_FILES" -gt 1 ]; then
+          echo "❌ FATAL: Multiple advisor.py files found in backend directories:"
+          find . -name "advisor.py" -path "*/backend/*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "*/venv/*"
+          exit 1
+        fi
+        echo "✅ PASS: Only one advisor.py in backend directories"
+    
+    - name: Run canonical backend tests
+      run: |
+        cd apps/maestra.8825.systems/backend
+        pytest test_canonical_backend.py -v || exit 1
+    
+    - name: Verify CANONICAL_REALITY.md exists
+      run: |
+        if [ ! -f "CANONICAL_REALITY.md" ]; then
+          echo "❌ FATAL: CANONICAL_REALITY.md missing from repo root"
+          exit 1
+        fi
+        echo "✅ PASS: CANONICAL_REALITY.md exists"

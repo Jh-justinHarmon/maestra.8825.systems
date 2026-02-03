@@ -38,6 +38,62 @@ if _ci_env and _minimal_mode:
         "Set MAESTRA_MINIMAL_MODE=false or remove the variable."
     )
 
+# =============================================================================
+# RUNTIME IDENTITY ASSERTION (PROMPT 4)
+# =============================================================================
+# Log runtime identity on every startup to prevent shadow backend confusion
+import os
+_server_path = os.path.abspath(__file__)
+_advisor_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "advisor.py"))
+_pythonpath = os.getenv("PYTHONPATH", "NOT SET")
+
+import hashlib
+def _file_hash(path):
+    with open(path, 'rb') as f:
+        return hashlib.sha1(f.read()).hexdigest()
+
+print("=" * 80)
+print("🔒 MAESTRA BACKEND RUNTIME IDENTITY")
+print("=" * 80)
+print(f"PID:          {os.getpid()}")
+print(f"server.py:    {_server_path}")
+print(f"  SHA1:       {_file_hash(_server_path)}")
+print(f"advisor.py:   {_advisor_path}")
+print(f"  SHA1:       {_file_hash(_advisor_path)}")
+print(f"PYTHONPATH:   {_pythonpath}")
+print("=" * 80)
+
+# Verify canonical location
+_canonical_backend = "/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/8825/apps/maestra.8825.systems/backend"
+if not _server_path.startswith(_canonical_backend):
+    raise RuntimeError(
+        f"❌ FATAL: Backend started from non-canonical location.\n"
+        f"   Expected: {_canonical_backend}/server.py\n"
+        f"   Actual:   {_server_path}\n"
+        f"   See: apps/maestra.8825.systems/backend/START_BACKEND.md"
+    )
+
+# =============================================================================
+# HARD PYTHONPATH GUARD (PROMPT 6)
+# =============================================================================
+# Fail fast if system/ is not in PYTHONPATH - no warnings, no fallbacks
+_system_dir = "/Users/justinharmon/Hammer Consulting Dropbox/Justin Harmon/8825-Team/8825/system"
+if _system_dir not in _pythonpath and _pythonpath != "NOT SET":
+    raise RuntimeError(
+        f"❌ FATAL: system/ directory not in PYTHONPATH.\n"
+        f"   Required: {_system_dir}\n"
+        f"   Current PYTHONPATH: {_pythonpath}\n"
+        f"   Backend cannot start without system modules.\n"
+        f"   See: apps/maestra.8825.systems/backend/START_BACKEND.md"
+    )
+if _pythonpath == "NOT SET":
+    raise RuntimeError(
+        f"❌ FATAL: PYTHONPATH not set.\n"
+        f"   Required: {_system_dir}\n"
+        f"   Backend cannot start without system modules.\n"
+        f"   See: apps/maestra.8825.systems/backend/START_BACKEND.md"
+    )
+
 # Prometheus metrics
 try:
     from prometheus_client import Counter, Histogram, CONTENT_TYPE_LATEST, generate_latest
@@ -130,12 +186,18 @@ def validate_system_dependencies():
     
     logger.info("🔍 Validating system dependencies...")
     
-    # Check system/ directory exists
-    system_dir = Path("/app/system")
-    if not system_dir.exists():
+    # Check system/ directory exists - support both Docker and local dev paths
+    docker_system_dir = Path("/app/system")
+    local_system_dir = Path(__file__).parent.parent.parent.parent / "system"
+    
+    if docker_system_dir.exists():
+        system_dir = docker_system_dir
+    elif local_system_dir.exists():
+        system_dir = local_system_dir
+    else:
         raise RuntimeError(
-            f"❌ FATAL: system/ directory not found at {system_dir}. "
-            "Deployment failed - check Dockerfile COPY paths."
+            f"❌ FATAL: system/ directory not found at {docker_system_dir} or {local_system_dir}. "
+            "Deployment failed - check paths."
         )
     logger.info(f"✅ system/ directory found at {system_dir}")
     
@@ -679,48 +741,27 @@ async def deep_health_check():
 
 
 @app.get("/health")
-async def health_check() -> HealthResponse:
-    """
-    Health check endpoint.
+async def health_check():
+    """Health check endpoint with runtime identity proof (PROMPT 21)"""
+    import routing
+    import time
     
-    Returns service status, dependency health, and LLM quota usage.
-    """
-    # Check dependencies
-    dependencies = {
-        "jh_brain": "unknown",  # Would ping Jh Brain MCP
-        "memory_hub": "unknown",  # Would ping Memory Hub MCP
-        "deep_research": "unknown"  # Would ping deep-research MCP
+    db_url = os.getenv("DATABASE_URL")
+    
+    return {
+        "status": "healthy",
+        "canonical_backend": True,
+        "server_file": _server_path,
+        "advisor_file": _advisor_path,
+        "system_path": os.path.dirname(routing.__file__),
+        "pid": os.getpid(),
+        "startup_time": time.time(),
+        "health_code_version": "v2-identity-enforced",
+        "persistence_available": db_url is not None,
+        "regex_version": "explicit-load-only",
+        "implicit_load_allowed": False,
+        "supports_streaming": False
     }
-
-    try:
-        provider, _ = get_configured_llm_provider()
-        dependencies["llm"] = f"configured:{provider}"
-    except Exception:
-        dependencies["llm"] = "missing"
-    
-    # Check sidecar health
-    if HAS_SIDECAR:
-        sidecar_health = await sidecar_client.health_check()
-        dependencies["capability_sidecar"] = "healthy" if sidecar_health.get("success") else "unhealthy"
-    else:
-        dependencies["capability_sidecar"] = "missing"
-
-    # Calculate quota usage
-    today = date.today()
-
-    daily_calls = llm_call_counter[today]
-    quota_usage_pct = (daily_calls / daily_quota * 100) if daily_quota > 0 else 0.0
-    
-    return HealthResponse(
-        status="healthy",
-        service="maestra-backend",
-        version="1.0.0",
-        timestamp=datetime.utcnow(),
-        dependencies=dependencies,
-        daily_llm_calls=daily_calls,
-        daily_quota=daily_quota,
-        quota_usage_pct=round(quota_usage_pct, 2)
-    )
 
 
 @app.post("/api/maestra/session/handshake")
@@ -774,8 +815,13 @@ async def advisor_ask(request: AdvisorAskRequest) -> AdvisorAskResponse:
         return response
     except EnforcementViolation as e:
         # 🔴 ENFORCEMENT VIOLATION — Convert to honest refusal
+        # This path is reached when advisor.py's enforce_and_return() raises
+        # We must still pass through enforcement to maintain single exit point
         logger.critical(f"🔴 ENFORCEMENT_VIOLATION | type={type(e).__name__} | detail={e}")
-        return AdvisorAskResponse(
+        
+        from enforcement_kernel import enforce_and_return
+        
+        response = AdvisorAskResponse(
             answer=(
                 "I cannot provide this response because it would misrepresent my sources or capabilities. "
                 f"Reason: {type(e).__name__}"
@@ -789,6 +835,9 @@ async def advisor_ask(request: AdvisorAskRequest) -> AdvisorAskResponse:
             system_mode="full",
             authority="none"
         )
+        
+        # 🔴 ENFORCEMENT KERNEL — NON-BYPASSABLE (even for caught violations)
+        return enforce_and_return(response, sources=[], system_mode="full", epistemic_state="REFUSED")
     except LLMConfigurationError as e:
         logger.error(f"Advisor misconfigured (LLM): {e}")
         raise HTTPException(

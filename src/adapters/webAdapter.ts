@@ -300,8 +300,6 @@ export const webAdapter: Adapter = {
           clearTimeout(timeoutId);
 
           if (!response.ok) {
-            // STREAMING DISABLED — FALL BACK TO JSON (HARD FIX)
-            const streaming = false;
             const data = await response.json();
             
             // FIX 6: Fail-loud if backend returns invalid response
@@ -394,12 +392,12 @@ export const webAdapter: Adapter = {
         }
         
         // PROMPT G: UI safety net - detect implicit conversation load attempts
-        if (data.answer && 
-            data.answer.startsWith("Conversation '") && 
+        if ((data as any).answer && 
+            (data as any).answer.startsWith("Conversation '") && 
             !message.trim().toLowerCase().startsWith('load ')) {
           console.error('[MAESTRA] Backend attempted implicit conversation load:', {
             userInput: message,
-            backendResponse: data.answer
+            backendResponse: (data as any).answer
           });
           return {
             answer: "⚠️ Internal error: backend attempted implicit conversation load",
