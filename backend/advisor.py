@@ -472,19 +472,8 @@ async def get_context_from_brain(topic: str, focus: str = "global") -> Tuple[str
     
     Loads manifesto, philosophy, and strategic reference for context.
     """
-    knowledge = _load_8825_knowledge()
-    
-    # Extract relevant sections based on topic keywords
-    topic_lower = topic.lower()
-    context_parts = []
-    
-    # Always include core manifesto for 8825-related queries
-    if any(kw in topic_lower for kw in ['8825', 'maestra', 'philosophy', 'context', 'ai', 'work', 'help']):
-        # Include key sections
-        context_parts.append("8825 CORE KNOWLEDGE:\n")
-        context_parts.append(knowledge[:4000])  # First 4000 chars covers manifesto + pillars
-    
-    context = "\n".join(context_parts) if context_parts else f"Topic: {topic}"
+    # PROMPT 2: Conditional logic removed - identity always present via inject_context_into_prompt
+    context = f"Topic: {topic}"
     
     sources = [
         SourceReference(
@@ -1093,6 +1082,12 @@ async def process_quick_question(request: AdvisorAskRequest) -> AdvisorAskRespon
     )
 
     # LLM synthesis (OpenRouter default; OpenAI/Anthropic fallbacks)
+    # PROMPT 4: Assert system prompt contains identity
+    assert messages[0]["role"] == "system", "First message must be system role"
+    assert "Maestra" in messages[0]["content"] or "8825" in messages[0]["content"], "System prompt must contain identity"
+    
+    logger.info(f"[IDENTITY CHECK] System prompt: {messages[0]['content'][:200]}...")
+    
     answer = await chat_completion(messages=messages)
     
     # Log to memory
